@@ -64,7 +64,7 @@ DNSQName::DNSQName(uint8_t* begin, size_t maxlen, DNSPacket& packet): begin_{beg
 																	  packet_{packet} {
 	uint8_t* iter = begin;
 	while (iter < (begin_ + maxlen)) {
-		packet_.labels_.push_back(DNSLabel{iter});
+		packet_.get().labels_.push_back(DNSLabel{iter});
 		if (iter[0] == 0) {
 			break;
 		} else if (iter[0] < 64) {
@@ -82,7 +82,7 @@ DNSQName::DNSQName(uint8_t* begin, size_t maxlen, DNSPacket& packet): begin_{beg
 
 size_t DNSQName::labelsToString(std::vector<DNSLabel>::iterator first, char* buffer, size_t maxlen) const {
 	size_t len = maxlen;
-	for (std::vector<DNSLabel>::iterator label = first; label != packet_.labels_.end(); ++label) {
+	for (std::vector<DNSLabel>::iterator label = first; label != packet_.get().labels_.end(); ++label) {
 		if (!label->isPointer()) {
 			if (label->length() == 0) {
 				break;
@@ -94,8 +94,8 @@ size_t DNSQName::labelsToString(std::vector<DNSLabel>::iterator first, char* buf
 				len -= label->length() + 1;
 			}
 		} else {
-			size_t s = labelsToString(std::find_if(packet_.labels_.begin(), packet_.labels_.end(), [this, label](const DNSLabel& rhs) {
-					return (packet_.begin_ + label->offset()) == rhs.begin_;
+			size_t s = labelsToString(std::find_if(packet_.get().labels_.begin(), packet_.get().labels_.end(), [this, label](const DNSLabel& rhs) {
+					return (packet_.get().begin_ + label->offset()) == rhs.begin_;
 				}), buffer, len);
 				buffer += s;
 				len -= s;
@@ -106,7 +106,7 @@ size_t DNSQName::labelsToString(std::vector<DNSLabel>::iterator first, char* buf
 }
 
 size_t DNSQName::toString(char* buffer, size_t maxlen) const {
-	return labelsToString(std::find_if(packet_.labels_.begin(), packet_.labels_.end(), [this](const DNSLabel& rhs) {
+	return labelsToString(std::find_if(packet_.get().labels_.begin(), packet_.get().labels_.end(), [this](const DNSLabel& rhs) {
 					return rhs.begin_ == begin_;
 				}), buffer, maxlen);
 }
@@ -114,9 +114,9 @@ size_t DNSQName::toString(char* buffer, size_t maxlen) const {
 size_t DNSQName::size() const {
 	size_t len = 0;
 	for (std::vector<DNSLabel>::iterator label = std::find_if(
-		packet_.labels_.begin(), packet_.labels_.end(), [this](const DNSLabel& rhs) {
+		packet_.get().labels_.begin(), packet_.get().labels_.end(), [this](const DNSLabel& rhs) {
 			return rhs.begin_ == begin_;
-		}); label != packet_.labels_.end(); ++label) {
+		}); label != packet_.get().labels_.end(); ++label) {
 		len += label->size();
 		if (label->isPointer() || label->length() == 0) break;
 	}
@@ -132,7 +132,7 @@ DNSQuestion::DNSQuestion(uint8_t* begin, size_t maxlen, DNSPacket& packet): begi
 	len -= name_.size();
 
 	//
-	if (len < sizeof(uint16_t)) throw std::out_of_range{"Packet to small"};
+	if (len < sizeof(uint16_t)) throw std::out_of_range{"Packet too small"};
 	qtype_ = reinterpret_cast<uint16_t*>(begin);
 	begin += sizeof(uint16_t);
 	len -= sizeof(uint16_t);
@@ -239,7 +239,7 @@ uint8_t* DNSResource::rdata() const {
 }
 
 void DNSResource::rdata(uint8_t* data, size_t newlen) {
-	packet_.resize(rdata(), rdlength(), newlen);
+	packet_.get().resize(rdata(), rdlength(), newlen);
 	rdlength(newlen);
 	memcpy(rdata_, data, newlen);
 }
@@ -339,11 +339,6 @@ size_t DNSResource::size() const {
 	return name_.size() + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint16_t) + rdlength();
 }
 
-DNSPacket::DNSPacket(): begin_{nullptr},
-						len_{0},
-						buflen_{0} {
-}
-
 DNSPacket::DNSPacket(uint8_t* begin, size_t len, size_t buflen): begin_{begin},
 																 len_{len},
 																 buflen_{buflen} {
@@ -379,6 +374,70 @@ DNSPacket::DNSPacket(uint8_t* begin, size_t len, size_t buflen): begin_{begin},
 		begin += additional_[i].size();
 		len -= additional_[i].size();
 		if (begin > (begin_ + len_)) throw std::out_of_range{"Packet too small"};
+	}
+}
+
+DNSPacket::DNSPacket(const DNSPacket& rhs): begin_{rhs.begin_},
+											len_{rhs.len_},
+											buflen_{rhs.buflen_},
+											header_{rhs.header_},
+											labels_{rhs.labels_},
+											question_{rhs.question_},
+											answer_{rhs.answer_},
+											authority_{rhs.authority_},
+											additional_{rhs.additional_}
+{
+	for (auto& question: question_) {
+		question.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: answer_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: authority_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: additional_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+}
+
+DNSPacket::DNSPacket(DNSPacket&& rhs): begin_{rhs.begin_},
+											len_{rhs.len_},
+											buflen_{rhs.buflen_},
+											header_{rhs.header_},
+											labels_{rhs.labels_},
+											question_{rhs.question_},
+											answer_{rhs.answer_},
+											authority_{rhs.authority_},
+											additional_{rhs.additional_}
+{
+	rhs.begin_ = nullptr;
+	rhs.len_ = 0;
+	rhs.buflen_ = 0;
+	rhs.header_ = nullptr;
+	for (auto& question: question_) {
+		question.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: answer_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: authority_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
+	}
+	
+	for (auto& resource: additional_) {
+		resource.packet_ = std::reference_wrapper<DNSPacket>{*this};
+		resource.name_.packet_ = std::reference_wrapper<DNSPacket>{*this};
 	}
 }
 

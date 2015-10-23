@@ -29,11 +29,19 @@
 #include <net/if.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <limits.h>
 
 TestException::TestException(std::string what): what_{what} {}
 
 const char* TestException::what() const noexcept {
 	return what_.c_str();
+}
+
+DnsQuery::DnsQuery(uint8_t* query_data, size_t query_data_len, size_t query_data_maxlen): query_data_{std::unique_ptr<uint8_t>{query_data}},
+																						  query_{DNSPacket{query_data_.get(), query_data_len, query_data_maxlen}},
+																						  received_{false},
+																						  answered_{false}
+{
 }
 
 DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint8_t id, uint16_t num_req, uint16_t num_burst, std::chrono::nanoseconds burst_delay):
@@ -75,14 +83,12 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint8_t id, uin
 		throw TestException("Cannot set timeout: setsockopt failed");
 	}
 	/* Preallocate the test queries */
-	for (int id = 0; id < num_req_; id++) {
-		tests_.push_back(DnsQuery{});
-	}
+	tests_.reserve(num_req_);
 	/* Create the test queries */
 	for (int id = 0; id < num_req_; id++) {
-		DnsQuery& test = tests_[id];
+		std::unique_ptr<uint8_t> query_data = std::unique_ptr<uint8_t>{new uint8_t[UDP_MAX_LEN]};
 		/* Filling the header */
-		DNSHeader* header = reinterpret_cast<DNSHeader*>(test.query_data_);
+		DNSHeader* header = reinterpret_cast<DNSHeader*>(query_data.get());
 		header->id(id);
 		header->qr(0);
 		header->opcode(DNSHeader::OpCode::Query);
@@ -96,7 +102,7 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint8_t id, uin
 		header->nscount(0);
 		header->arcount(0);
 		/* Creating the question*/
-		uint8_t* question = test.query_data_ + sizeof(DNSHeader);
+		uint8_t* question = query_data.get() + sizeof(DNSHeader);
 		/* Creating the domain name */
 		char query_addr[512];
 		snprintf(query_addr, sizeof(query_addr), dns64_addr_format_string, id_, id / 256, id % 256);
@@ -116,11 +122,9 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint8_t id, uin
 		question += sizeof(uint16_t);
 		*reinterpret_cast<uint16_t*>(question) = htons(QClass::IN);
 		question += sizeof(uint16_t);
-		/* Parsing the raw packet into the DNSPacket structure */
-		test.query_ = DNSPacket{test.query_data_, (size_t) (question - test.query_data_), sizeof(test.query_data_)};
-		/* Setting flags */
-		test.received_ = false;
-		test.answered_ = false;
+		/* Constructing the DnsQuery */
+		size_t len = (size_t) (question - query_data.get());
+		tests_.push_back(DnsQuery{query_data.release(), len, UDP_MAX_LEN});
 	}
 }
 
@@ -166,10 +170,14 @@ void DnsTester::start() {
 			std::chrono::high_resolution_clock::time_point time_received = std::chrono::high_resolution_clock::now();
 			/* Test whether the answer came from the DUT */
 			if (memcmp(reinterpret_cast<const void*>(&sender.sin6_addr), reinterpret_cast<const void*>(&server_.sin6_addr), sizeof(struct in6_addr)) != 0 || sender.sin6_port != server_.sin6_port) {
-				throw TestException{"Received packet from other host than the DUT."};
+				char server[INET6_ADDRSTRLEN];
+				inet_ntop(AF_INET6, reinterpret_cast<const void*>(&server_.sin6_addr), server, sizeof(server));
+				std::stringstream ss;
+				ss << "Received packet from other host than the DUT: " << server;
+				throw TestException{ss.str()};
 			}
 			/* Parse the answer */
-			DNSPacket answer = DNSPacket{answer_data, (size_t) recvlen, sizeof(answer_data)};
+			DNSPacket answer{answer_data, (size_t) recvlen, sizeof(answer_data)};
 			/* Test whether the query id is valid */
 			if (answer.header_->id() >= tests_.size()) {
 				std::stringstream ss;
@@ -232,4 +240,35 @@ void DnsTester::display() {
 	printf("Valid answers: %hu (%.02f%%)\n", num_answered, (double) num_answered / tests_.size());
 	printf("Average round-trip time: %.02f ms\n", average / 1000000.0);
 	printf("Standard deviation of the round-trip time: %.02f ms\n", standard_deviation / 1000000.0);
+}
+
+void DnsTester::write(const char* filename) {
+	FILE* fp;
+	char server[INET6_ADDRSTRLEN];
+	/* Convert server address to string */
+	if (inet_ntop(AF_INET6, reinterpret_cast<const void*>(&server_.sin6_addr), server, sizeof(server)) == NULL) {
+		std::stringstream ss;
+		ss << "Bad server address: " << strerror(errno);
+		throw TestException{ss.str()};
+	}
+	/* Open file */
+	if ((fp = fopen(filename, "w")) == nullptr) {
+		throw TestException{"Can't open file"};
+	}
+	/* Write header */
+	fprintf(fp, "%s\n", "dns64perf++ test parameters");
+	fprintf(fp, "server: %s\n", server);
+	fprintf(fp, "port: %hu\n", ntohs(server_.sin6_port));
+	fprintf(fp, "id: %hhu\n", id_);
+	fprintf(fp, "number of requests: %hu\n", num_req_);
+	fprintf(fp, "burst size: %hu\n", num_burst_);
+	fprintf(fp, "delay between bursts: %lu ns\n\n", burst_delay_.count());
+	fprintf(fp, "id;name;tsent [ns];received;answered;rtt [ns]\n");
+	/* Write queries */
+	char name[256];
+	for (auto& query: tests_) {
+		query.query_.question_[0].name_.toString(name, sizeof(name));
+		fprintf(fp, "%hu;%s;%lu;%d;%d;%lu\n", query.query_.header_->id(), name, std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count(), query.received_, query.answered_, query.rtt_.count());
+	}
+	fclose(fp);
 }

@@ -65,12 +65,14 @@ class TestException: public std::exception
  * Class to represent one test query
  */
 struct DnsQuery {
-		uint8_t query_data_[UDP_MAX_LEN]; /**< Array to store the packet */
+		std::unique_ptr<uint8_t> query_data_; /**< Array to store the packet */
 		DNSPacket query_; /**< The DNSPacket representation of the query */
 		std::chrono::high_resolution_clock::time_point time_sent_; /**< Timestamp of the send time */
 		bool received_; /**< Flag to mark whether an answer has been received */
 		bool answered_; /**< Flag to mark whether the answer was valid */
 		std::chrono::nanoseconds rtt_; /**< Round-trip time of the query */
+		
+		DnsQuery(uint8_t* query_data, size_t query_data_len, size_t query_data_maxlen);
 };
 
 /**
@@ -114,6 +116,12 @@ class DnsTester {
 		 * Displays the test results
 		 */
 		void display();
+		
+		/**
+		 * Writes the test results to a file.
+		 * @param filename the file to write to
+		 */
+		void write(const char* filename);
 };
 
 #endif

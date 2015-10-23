@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <map>
 #include <exception>
+#include <functional>
 #include <stdint.h>
 #include <netinet/in.h>
 
@@ -371,7 +372,7 @@ struct DNSQName
 {
 	uint8_t* begin_; /**< Pointer to the beginning of the QName. */
 	
-	DNSPacket& packet_; /**< Packet to which the QName belongs.*/
+	std::reference_wrapper<DNSPacket> packet_; /**< Packet to which the QName belongs.*/
 	
 	/**
 	 * Constructor.
@@ -469,7 +470,7 @@ struct DNSResource
 	uint32_t* ttl_; /**< The TTL of the Resource. */
 	uint16_t* rdlength_; /**< The rdata length of the Resource. */
 	uint8_t* rdata_; /**< The rdata of the Resource. */
-	DNSPacket& packet_; /**< Packet to which the Resource belongs.*/
+	std::reference_wrapper<DNSPacket> packet_; /**< Packet to which the Resource belongs.*/
 	
 	/**
 	 * Getter for the Query Type.
@@ -576,16 +577,24 @@ struct DNSPacket
 	
 	/**
 	 * Constructor.
-	 */
-	DNSPacket();
-	
-	/**
-	 * Constructor.
 	 * @param begin pointer to the beginning of the packet
 	 * @param len the length of the packet
 	 * @param buflen the length of the buffer storing the packet
 	 */
 	DNSPacket(uint8_t* begin, size_t len, size_t buflen);
+	
+	/**
+	 * Copy constructor.
+	 * @param rhs DNSPacket to copy from
+	 */
+	DNSPacket(const DNSPacket& rhs);
+	
+	/**
+	 * Move constructor.
+	 * @param rhs DNSPacket to move from
+	 */
+	DNSPacket(DNSPacket&& rhs);
+	
 	
 	/**
 	 * Function to resize the packet.

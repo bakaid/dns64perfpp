@@ -25,9 +25,14 @@ CXX = clang++
 CXXFLAGS = -std=c++11 -O3 -Wall -Wdeprecated -pedantic -g
 LDFLAGS = -lm -lpthread
 
+PREFIX = /usr
+
 .PHONY: all clean
 
 all: $(BINARY)
+
+install: all
+	install -m 0755 $(BINARY) $(PREFIX)/sbin
 
 clean:
 	rm -f $(BINARY) $(OBJECTS)

@@ -72,6 +72,7 @@ int main(int argc, char* argv[]) {
 		DnsTester tester{server_addr, port, id, num_req, num_burst, std::chrono::nanoseconds{burst_delay}};
 		tester.start();
 		tester.display();
+		tester.write("dns64perf.csv");
 	} catch (std::exception& e) {
 		std::cerr << e.what() << std::endl;
 	}
