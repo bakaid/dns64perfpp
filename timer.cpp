@@ -25,17 +25,23 @@ Timer::Timer(std::function<void (void)>&& task, std::chrono::nanoseconds interva
 
 void Timer::run() {
     std::chrono::high_resolution_clock::time_point before;
-    std::chrono::
-    nanoseconds function_execution_time;
+    std::chrono::nanoseconds function_execution_time, sleep_time, real_sleep_time;
     while (!stop_ && n_ > 0) {
         before = std::chrono::high_resolution_clock::now();
         task_();
         function_execution_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
         if (function_execution_time > interval_) {
 			std::cerr << "Can't keep up!" << std::endl;
-        };
+        }
         --n_;
-        std::this_thread::sleep_for(interval_ - function_execution_time);
+        sleep_time = interval_ - function_execution_time;
+        before = std::chrono::high_resolution_clock::now();
+        std::this_thread::sleep_for(sleep_time);
+        real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
+        double diff = ((double) real_sleep_time.count()) / ((double) sleep_time.count());
+        if (diff > 1.05) {
+			fprintf(stderr, "Timmer is off by %.02f%%!\n", (diff-1)*100);
+		}
     }
 }
 
