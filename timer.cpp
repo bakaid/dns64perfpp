@@ -1,5 +1,5 @@
 /* dns64perf++ - C++11 DNS64 performance tester
- * Based on dns64perf by Gabor Lencse <lencse@sze.hu> (http://dev.tilb.sze.hu/dns64perf/)
+ * Based on dns64perf by Gabor Lencse <lencse@sze.hu> (http://ipv6.tilb.sze.hu/dns64perf/)
  * Copyright (C) 2015  Daniel Bakai <bakaid@kszk.bme.hu>
  * 
  * This program is free software; you can redistribute it and/or
@@ -20,6 +20,7 @@
 #include "timer.h"
 
 #include <iostream>
+#include "spin_sleep.hpp"
 
 Timer::Timer(std::function<void (void)>&& task, std::chrono::nanoseconds interval, size_t n): task_{task}, interval_{interval}, n_{n}, stop_{false} {}
 
@@ -36,10 +37,14 @@ void Timer::run() {
         --n_;
         sleep_time = interval_ - function_execution_time;
         before = std::chrono::high_resolution_clock::now();
-        std::this_thread::sleep_for(sleep_time);
+        if (interval_ > std::chrono::nanoseconds{5000000}) {
+			std::this_thread::sleep_for(sleep_time);
+		} else {
+			spinsleep::sleep_for(sleep_time);
+		}
         real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
         double diff = ((double) real_sleep_time.count()) / ((double) sleep_time.count());
-        if (diff > 1.05) {
+        if (diff > 1.05 || diff < 0.95) {
 			fprintf(stderr, "Timmer is off by %.02f%%!\n", (diff-1)*100);
 		}
     }

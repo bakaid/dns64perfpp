@@ -1,5 +1,5 @@
 /* dns64perf++ - C++11 DNS64 performance tester
- * Based on dns64perf by Gabor Lencse <lencse@sze.hu> (http://dev.tilb.sze.hu/dns64perf/)
+ * Based on dns64perf by Gabor Lencse <lencse@sze.hu> (http://ipv6.tilb.sze.hu/dns64perf/)
  * Copyright (C) 2015  Daniel Bakai <bakaid@kszk.bme.hu>
  * 
  * This program is free software; you can redistribute it and/or
@@ -31,11 +31,12 @@
 int main(int argc, char* argv[]) {
 	struct in6_addr server_addr;
 	uint16_t port;
-	uint8_t id;
-	uint16_t num_req, num_burst;
+	uint32_t ip;
+	uint8_t netmask;
+	uint32_t num_req, num_burst;
 	uint64_t burst_delay;
 	if (argc < 7) {
-		std::cerr << "Usage: dns64perf++ <server> <port> <id> <number of requests> <burst size> <delay between bursts in ns>" << std::endl;
+		std::cerr << "Usage: dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>" << std::endl;
 		return -1;
 	}
 	/* Server address */
@@ -48,19 +49,29 @@ int main(int argc, char* argv[]) {
 		std::cerr << "Bad port." << std::endl;
 		return -1;
 	}
-	/* ID */
-	if (sscanf(argv[3], "%hhu", &id) != 1) {
-		std::cerr << "Bad id." << std::endl;
+	/* Subnet */
+	uint8_t temp[4];
+	if (sscanf(argv[3], "%hhu.%hhu.%hhu.%hhu/%hhu", temp, temp+1, temp+2, temp+3, &netmask) != 5) {
+		std::cerr << "Bad subnet." << std::endl;
 		return -1;
 	}
+	if (netmask > 32) {
+		std::cerr << "Bad netmask." << std::endl;
+		return -1;
+	}
+	ip = ((temp[0] << 24) | (temp[1] << 16) | (temp[2] << 8) | temp[3]) & ~(((uint64_t) 1 << (32-netmask))-1);
 	/* Number of requests */
-	if (sscanf(argv[4], "%hu", &num_req) != 1) {
-		std::cerr << "Bad number of requests, must be between 0 and 65535." << std::endl;
+	if (sscanf(argv[4], "%u", &num_req) != 1) {
+		std::cerr << "Bad number of requests, must be between 0 and 2^32." << std::endl;
+		return -1;
+	}
+	if (num_req > ((uint64_t) 1 << (32-netmask))) {
+		std::cerr << "The number of requests is higher than the avaliable IPs in the subnet." << std::endl;
 		return -1;
 	}
 	/* Burst size */
-	if (sscanf(argv[5], "%hu", &num_burst) != 1) {
-		std::cerr << "Bad burst size, must be between 0 and 65535." << std::endl;
+	if (sscanf(argv[5], "%u", &num_burst) != 1) {
+		std::cerr << "Bad burst size, must be between 0 and 2^32." << std::endl;
 		return -1;
 	}
 	/* Burst size */
@@ -69,7 +80,7 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 	try {
-		DnsTester tester{server_addr, port, id, num_req, num_burst, std::chrono::nanoseconds{burst_delay}};
+		DnsTester tester{server_addr, port, ip, netmask, num_req, num_burst, std::chrono::nanoseconds{burst_delay}};
 		tester.start();
 		tester.display();
 		tester.write("dns64perf.csv");

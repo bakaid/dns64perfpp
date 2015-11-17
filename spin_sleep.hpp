@@ -17,49 +17,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
  
-#include <cstring>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <unistd.h>
-#include "raii_socket.h"
+#ifndef SPIN_SLEEP_H_INCLUDED_
+#define SPIN_SLEEP_H_INCLUDED_
 
-SocketException::SocketException(std::string what): what_{what} {}
+#include <chrono>
 
-const char* SocketException::what() const noexcept {
-	return what_.c_str();
-}
-
-Socket::Socket(int sockfd): sockfd_{sockfd}, closed_{false} {
-
-}
-
-Socket::~Socket() {
-	if (!closed_ && sockfd_ != -1) {
-		::close(sockfd_);
+namespace spinsleep {
+	template<class Rep, class Period>
+	void sleep_for(const std::chrono::duration<Rep, Period>& sleep_duration) {
+		auto test = std::chrono::high_resolution_clock::now() + sleep_duration;
+		while (std::chrono::high_resolution_clock::now() < test);
 	}
-}
+};
 
-Socket::Socket(Socket&& rhs): sockfd_{rhs.sockfd_} {
-	rhs.sockfd_ = -1;
-}
 
-Socket& Socket::operator=(Socket&& rhs) {
-	sockfd_ = rhs.sockfd_;
-	rhs.sockfd_ = -1;
-	return *this;
-}
 
-void Socket::close() {
-	if (sockfd_ == -1) {
-		throw SocketException{"No valid managed socket."};
-	}
-	if (::close(sockfd_) == -1) {
-		throw SocketException{strerror(errno)};
-	}
-	closed_ = true;
-}
-
-Socket::operator int() {
-	return sockfd_;
-}
+#endif
