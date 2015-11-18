@@ -13,12 +13,19 @@ Method
 ------
 
 dns64perf++ sends AAAA queries for domain names generated on-the-fly, incrementally from a specific subnet in the form {000..255}-{000..255}-{000..255}-{000..255}.dns64perf.test.
+
 It uses a function execution time-compensated timer on a worker thread to send these requests at a specific frequency.
+
 Below 200 Hz (>5 ms) it uses std::this_thread::sleep_for() for timing, over 200 Hz it uses active sleep (a spinlock) to ensure better timer accuracy.
+
 The requests can be sent in bursts, in which case the specified number of requests are sent at every tick of the timer.
+
 If the function execution takes longer than the avaliable time specified for its execution, then the application writes a "Can't keep up" message to the standard error output.
+
 If the timer accuracy is off by more than 5%, then the application writes an error message to the standard output.
+
 The main thread starts the timer, then receives the replies from the DUT, calculating the Round-trip time of the reply, and checking whether there is an answer (ancount > 0) in the reply.
+
 After the last query has been sent, the main thread waits for 2 more seconds for replies, then calculates the parameteres of the test and writes the raw test data to a file named dns64perf.csv.
 
 Build
@@ -37,10 +44,14 @@ If you installed dns64perf++ you can start a measurement using:
 
 dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>
 
-Where:
 _server_: the IPv6 address of the DUT
+
 _port_: the port on which the DNS64 server listens
+
 _subnet_: the subnet to use in the measurement, e.g.: 10.0.0.0/8, 192.168.0.0/24
+
 _number of requests_: the number of requests to send, must be between 1 and the maximum number of IPv4 addresses in the specified subnet
+
 _burst size_: the number of requests to send at every timer tick, must be the divisor of the number of requests
+
 _delay between bursts in ns_: 1/<timer frequency> in nanoseconds
