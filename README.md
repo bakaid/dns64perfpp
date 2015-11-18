@@ -33,8 +33,8 @@ Build
 dns64perf++ is written in C++11 and requires >=clang-3.5 or >=gcc-4.8.3 to compile.
 
 To compile and install dns64perf++ issue:
-make
-sudo make install
+	make
+	sudo make install
 
 Usage
 -----
@@ -42,16 +42,16 @@ dns64perf++ can be parameterized using command line arguments. All the arguments
 
 If you installed dns64perf++ you can start a measurement using:
 
-dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>
+	dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>
 
-_server_: the IPv6 address of the DUT
+__server__: the IPv6 address of the DUT
 
-_port_: the port on which the DNS64 server listens
+__port__: the port on which the DNS64 server listens
 
-_subnet_: the subnet to use in the measurement, e.g.: 10.0.0.0/8, 192.168.0.0/24
+__subnet__: the subnet to use in the measurement, e.g.: 10.0.0.0/8, 192.168.0.0/24
 
-_number of requests_: the number of requests to send, must be between 1 and the maximum number of IPv4 addresses in the specified subnet
+__number of requests__: the number of requests to send, must be between 1 and the maximum number of IPv4 addresses in the specified subnet
 
-_burst size_: the number of requests to send at every timer tick, must be the divisor of the number of requests
+__burst size__: the number of requests to send at every timer tick, must be the divisor of the number of requests
 
-_delay between bursts in ns_: 1/<timer frequency> in nanoseconds
+__delay between bursts in ns__: 1/<timer frequency> in nanoseconds
