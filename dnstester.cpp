@@ -173,15 +173,17 @@ void DnsTester::start() {
 		if (remaining == 0) {
 			continue_receiving = false;
 		}
+		memset(&sender, 0x00, sizeof(sender));
+		sender_len = sizeof(sender);
 		if ((recvlen = ::recvfrom(sock_, answer_data, sizeof(answer_data), 0, reinterpret_cast<struct sockaddr*>(&sender), &sender_len)) > 0) {
 			/* Get the time of the receipt */
 			std::chrono::high_resolution_clock::time_point time_received = std::chrono::high_resolution_clock::now();
 			/* Test whether the answer came from the DUT */
 			if (memcmp(reinterpret_cast<const void*>(&sender.sin6_addr), reinterpret_cast<const void*>(&server_.sin6_addr), sizeof(struct in6_addr)) != 0 || sender.sin6_port != server_.sin6_port) {
-				char server[INET6_ADDRSTRLEN];
-				inet_ntop(AF_INET6, reinterpret_cast<const void*>(&server_.sin6_addr), server, sizeof(server));
+				char sender_text[INET6_ADDRSTRLEN];
+				inet_ntop(AF_INET6, reinterpret_cast<const void*>(&sender.sin6_addr), sender_text, sizeof(sender_text));
 				std::stringstream ss;
-				ss << "Received packet from other host than the DUT: " << server;
+				ss << "Received packet from other host than the DUT: [" << sender_text << "]:" << ntohs(sender.sin6_port);
 				throw TestException{ss.str()};
 			}
 			/* Parse the answer */
