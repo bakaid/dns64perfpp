@@ -137,10 +137,13 @@ void DnsTester::test() {
 		/* Get query store */
 		DnsQuery& query = tests_[num_sent_];
 		/* Modify the base query */
+		/* Modify the label */
 		char label[64];
 		uint32_t ip = ip_ | num_sent_;
 		snprintf(label, sizeof(label), dns64_addr_format_string, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		memcpy(query_->labels_[0].begin_+1, label, strlen(label));
+		/* Modify the Transaction ID */
+		query_->header_->id(num_sent_ % (1 << 16));
 		m_.unlock();
 		/* Send the query */
 		if (::sendto(sock_, reinterpret_cast<const void*>(query_->begin_), query_->len_, 0, reinterpret_cast<const struct sockaddr*>(&server_), sizeof(server_)) != query_->len_) {

@@ -25,29 +25,42 @@
 Timer::Timer(std::function<void (void)>&& task, std::chrono::nanoseconds interval, size_t n): task_{task}, interval_{interval}, n_{n}, stop_{false} {}
 
 void Timer::run() {
-    std::chrono::high_resolution_clock::time_point before;
-    std::chrono::nanoseconds function_execution_time, sleep_time, real_sleep_time;
-    while (!stop_ && n_ > 0) {
+    std::chrono::high_resolution_clock::time_point before, starttime;
+    std::chrono::nanoseconds interval, function_execution_time, sleep_time, real_sleep_time, full_time;
+    size_t n;
+    n = n_;
+    starttime = std::chrono::high_resolution_clock::now();
+    while (!stop_ && n > 0) {
         before = std::chrono::high_resolution_clock::now();
+        interval = n_*interval_ - std::chrono::duration_cast<std::chrono::nanoseconds>(before-starttime);
+        if (interval.count() < 0) {
+			interval = std::chrono::nanoseconds{0};
+		} else {
+			interval /= n;
+		}
         task_();
         function_execution_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
-        if (function_execution_time > interval_) {
+        if (function_execution_time > interval) {
 			std::cerr << "Can't keep up!" << std::endl;
         }
-        --n_;
-        sleep_time = interval_ - function_execution_time;
-        before = std::chrono::high_resolution_clock::now();
-        if (interval_ > std::chrono::nanoseconds{5000000}) {
-			std::this_thread::sleep_for(sleep_time);
-		} else {
-			spinsleep::sleep_for(sleep_time);
-		}
-        real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
-        double diff = ((double) real_sleep_time.count()) / ((double) sleep_time.count());
-        if (diff > 1.05 || diff < 0.95) {
-			fprintf(stderr, "Timmer is off by %.02f%%!\n", (diff-1)*100);
+        --n;
+        sleep_time = interval - function_execution_time;
+        if (sleep_time.count() > 0) {
+			before = std::chrono::high_resolution_clock::now();
+			if (sleep_time > std::chrono::nanoseconds{5000000}) {
+				std::this_thread::sleep_for(sleep_time);
+			} else {
+				spinsleep::sleep_for(sleep_time);
+			}
+			real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
+			double diff = ((double) real_sleep_time.count()) / ((double) sleep_time.count());
+			if (diff > 1.05 || diff < 0.95) {
+				fprintf(stderr, "Timer is off by %.02f%%!\n", (diff-1)*100);
+			}
 		}
     }
+    full_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - starttime);
+    fprintf(stderr, "Full timer execution took %lu ns, %.02f%% of specified.\n", full_time.count(), ((double) full_time.count()/(n_*interval_.count()))*100);
 }
 
 Timer::~Timer() {
