@@ -42,7 +42,7 @@ DnsQuery::DnsQuery(): received_{false},
 {
 }
 
-DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay):
+DnsTester::DnsTester(struct in6_addr source_addr, struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay):
 					ip_{ip},
 					netmask_{netmask},
 					num_req_{num_req},
@@ -67,7 +67,7 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, ui
 	struct sockaddr_in6 local_addr;
 	memset(&local_addr, 0x00, sizeof(local_addr));
 	local_addr.sin6_family = AF_INET6;  // IPv6
-	local_addr.sin6_addr = in6addr_any; // To any valid IP address
+	local_addr.sin6_addr = source_addr; // To any valid IP address
 	local_addr.sin6_port = htons(0);   // Get a random port
 	if (::bind(sock_, reinterpret_cast<struct sockaddr*>(&local_addr), sizeof(local_addr)) == -1) {
 		std::stringstream ss;
