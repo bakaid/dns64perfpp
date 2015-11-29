@@ -107,7 +107,7 @@ class DnsTester {
 		 * @param num_burst size of burst
 		 * @param burst_delay delay between bursts in nanoseconds
 		 */
-		DnsTester(struct in6_addr source_addr, struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay);
+		DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay);
 		
 		/**
 		 * Starts the test
