@@ -167,14 +167,16 @@ void DnsTester::start() {
 	ssize_t recvlen;
 	uint8_t answer_data[UDP_MAX_LEN];
 	bool continue_receiving;
+	std::chrono::time_point<std::chrono::high_resolution_clock> receive_until;
 	
 	continue_receiving = true;
-	while (continue_receiving) {
+	while (continue_receiving || std::chrono::high_resolution_clock::now() <= receive_until) {
 		m_.lock();
 		size_t remaining = num_req_ - num_sent_;
 		m_.unlock();
 		if (remaining == 0) {
 			continue_receiving = false;
+			receive_until = std::chrono::high_resolution_clock::now() + std::chrono::seconds{recvfrom_timeout};
 		}
 		memset(&sender, 0x00, sizeof(sender));
 		sender_len = sizeof(sender);
@@ -229,7 +231,7 @@ void DnsTester::start() {
 }
 
 void DnsTester::display() {
-	uint16_t num_received, num_answered;
+	uint32_t num_received, num_answered;
 	double average, standard_deviation;
 	num_received = 0;
 	num_answered = 0;
@@ -259,8 +261,8 @@ void DnsTester::display() {
 	standard_deviation = sqrt(standard_deviation / num_received);
 	/* Print results */
 	printf("Sent queries: %zu\n", tests_.size());
-	printf("Received answers: %hu (%.02f%%)\n", num_received, ((double) num_received / tests_.size()) * 100);
-	printf("Valid answers: %hu (%.02f%%)\n", num_answered, (double) num_answered / tests_.size());
+	printf("Received answers: %u (%.02f%%)\n", num_received, ((double) num_received / tests_.size()) * 100);
+	printf("Valid answers: %u (%.02f%%)\n", num_answered, (double) num_answered / tests_.size());
 	printf("Average round-trip time: %.02f ms\n", average / 1000000.0);
 	printf("Standard deviation of the round-trip time: %.02f ms\n", standard_deviation / 1000000.0);
 }
