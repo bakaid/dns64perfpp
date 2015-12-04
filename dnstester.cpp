@@ -21,10 +21,10 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <ctime>
 #include <sstream>
 #include <iostream>
 #include <unistd.h>
-#include <time.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <sys/types.h>
@@ -38,16 +38,18 @@ const char* TestException::what() const noexcept {
 }
 
 DnsQuery::DnsQuery(): received_{false},
-					  answered_{false}
+					  answered_{false},
+					  rtt_{std::chrono::nanoseconds{-1}}
 {
 }
 
-DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay):
+DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay, struct timeval timeout):
 					ip_{ip},
 					netmask_{netmask},
 					num_req_{num_req},
 					num_burst_{num_burst},
 					burst_delay_{burst_delay},
+					timeout_{timeout},
 					num_sent_{0}
 	{
 	/* Fill server sockaddr structure */
@@ -75,10 +77,7 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, ui
 		throw TestException{ss.str()};
 	}
 	/* Set socket timeout */
-	struct timeval tv;
-	tv.tv_sec = recvfrom_timeout;
-	tv.tv_usec = 0;
-	if (::setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const void*>(&tv), sizeof(tv))) {
+	if (::setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const void*>(&timeout_), sizeof(timeout_))) {
 		throw TestException("Cannot set timeout: setsockopt failed");
 	}
 	/* Preallocate the test queries */
@@ -176,7 +175,7 @@ void DnsTester::start() {
 		m_.unlock();
 		if (remaining == 0) {
 			continue_receiving = false;
-			receive_until = std::chrono::high_resolution_clock::now() + std::chrono::seconds{recvfrom_timeout};
+			receive_until = std::chrono::high_resolution_clock::now() + std::chrono::seconds{timeout_.tv_sec} + std::chrono::microseconds{timeout_.tv_usec};
 		}
 		memset(&sender, 0x00, sizeof(sender));
 		sender_len = sizeof(sender);
@@ -195,7 +194,8 @@ void DnsTester::start() {
 			DNSPacket answer{answer_data, (size_t) recvlen, sizeof(answer_data)};
 			/* Test whether the query is valid */
 			if (answer.header_->qdcount() < 1) {
-				throw TestException{"Invalid answer from server, qdcount == 0"};
+				/* It is invalid, continue */
+				continue;
 			}
 			/* Find the corresponding query */
 			char label[64];
@@ -218,7 +218,7 @@ void DnsTester::start() {
 			/* Calculate the Round-Trip-Time */
 			query.rtt_ = std::chrono::duration_cast<std::chrono::nanoseconds>(time_received - query.time_sent_);
 			/* Check whether there is an answer */
-			query.answered_ = answer.header_->qr() == 1 && answer.header_->rcode() == DNSHeader::RCODE::NoError && answer.header_->ancount() > 0;
+			query.answered_ = answer.header_->qr() == 1 && answer.header_->rcode() == DNSHeader::RCODE::NoError && answer.header_->ancount() > 0 && query.rtt_ < (std::chrono::seconds{timeout_.tv_sec} + std::chrono::microseconds{timeout_.tv_usec});
 		} else {
 			/* If the error is not caused by timeout, there is something wrong */
 			if (errno != EWOULDBLOCK) {
@@ -297,7 +297,7 @@ void DnsTester::write(const char* filename) {
 		ip = ip_ | n++;
 		snprintf(addr, sizeof(addr), dns64_addr_format_string, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		snprintf(query_addr, sizeof(query_addr), "%s.%s.", addr, dns64_addr_domain);
-		fprintf(fp, "%s;%lu;%d;%d;%lu\n", query_addr, std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count(), query.received_, query.answered_, query.rtt_.count());
+		fprintf(fp, "%s;%lu;%d;%d;%ld\n", query_addr, std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count(), query.received_, query.answered_, query.rtt_.count());
 	}
 	fclose(fp);
 }

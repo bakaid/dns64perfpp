@@ -39,7 +39,6 @@
 static const size_t UDP_MAX_LEN = 512;
 static const char* dns64_addr_format_string = "%03hhu-%03hhu-%03hhu-%03hhu";
 static const char* dns64_addr_domain = "dns64perf.test";
-static const uint8_t recvfrom_timeout = 2;
 
 /**
  * An std::exception class for the DnsTester.
@@ -85,6 +84,7 @@ class DnsTester {
 		uint32_t num_req_; /**< Number of requests */
 		uint32_t num_burst_; /**< Burst size */
 		std::chrono::nanoseconds burst_delay_; /**< Time between bursts in nanoseconds */
+		struct timeval timeout_;
 		Socket sock_; /**< Socket for sending and receiving queries */
 		uint8_t query_data_[UDP_MAX_LEN]; /**< Array to store the packet */
 		std::unique_ptr<DNSPacket> query_; /**< The DNSPacket representation of the query */
@@ -107,7 +107,7 @@ class DnsTester {
 		 * @param num_burst size of burst
 		 * @param burst_delay delay between bursts in nanoseconds
 		 */
-		DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay);
+		DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req, uint32_t num_burst, std::chrono::nanoseconds burst_delay, struct timeval timeout);
 		
 		/**
 		 * Starts the test

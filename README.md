@@ -43,7 +43,7 @@ dns64perf++ can be parameterized using command line arguments. All the arguments
 
 If you installed dns64perf++ you can start a measurement using:
 
-	dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>
+	dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns> <timeout in s>
 
 __server__: the IPv6 address of the DUT
 
@@ -55,4 +55,6 @@ __number of requests__: the number of requests to send, must be between 1 and th
 
 __burst size__: the number of requests to send at every timer tick, must be the divisor of the number of requests
 
-__delay between bursts in ns__: 1/<timer frequency> in nanoseconds
+__delay between bursts in ns__: 1/< timer frequency > in nanoseconds
+
+__timeout in s__: wait no more than this for an answer

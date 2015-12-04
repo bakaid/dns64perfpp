@@ -21,6 +21,8 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
+#include <cmath>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <sys/types.h>
@@ -35,8 +37,9 @@ int main(int argc, char* argv[]) {
 	uint8_t netmask;
 	uint32_t num_req, num_burst;
 	uint64_t burst_delay;
-	if (argc < 7) {
-		std::cerr << "Usage: dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns>" << std::endl;
+	struct timeval timeout;
+	if (argc < 8) {
+		std::cerr << "Usage: dns64perf++ <server> <port> <subnet> <number of requests> <burst size> <delay between bursts in ns> <timeout in s>" << std::endl;
 		return -1;
 	}
 	/* Server address */
@@ -79,8 +82,17 @@ int main(int argc, char* argv[]) {
 		std::cerr << "Bad delay between bursts." << std::endl;
 		return -1;
 	}
+	/* Timeout */
+	double timeout_, s, us;
+	if (sscanf(argv[7], "%lf", &timeout_) != 1) {
+		std::cerr << "Bad timeout." << std::endl;
+		return -1;
+	}
+	us = modf(timeout_, &s) * 1000000;
+	timeout.tv_sec = (time_t) s;
+	timeout.tv_usec = (suseconds_t) us;
 	try {
-		DnsTester tester{server_addr, port, ip, netmask, num_req, num_burst, std::chrono::nanoseconds{burst_delay}};
+		DnsTester tester{server_addr, port, ip, netmask, num_req, num_burst, std::chrono::nanoseconds{burst_delay}, timeout};
 		tester.start();
 		tester.display();
 		tester.write("dns64perf.csv");
