@@ -49,9 +49,10 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, ui
 					num_req_{num_req},
 					num_burst_{num_burst},
 					burst_delay_{burst_delay},
-					timeout_{timeout},
 					num_sent_{0}
 	{
+	/* Set timeout */
+	timeout_ = timeout;
 	/* Fill server sockaddr structure */
 	memset(&server_, 0x00, sizeof(server_));
 	server_.sin6_family = AF_INET6;
