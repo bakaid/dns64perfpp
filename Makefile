@@ -22,7 +22,7 @@ OBJECTS = main.o timer.o dns.o dnstester.o raii_socket.o
 HEADERS = timer.h dns.h dnstester.h raii_socket.h spin_sleep.hpp
 
 CXX = clang++
-CXXFLAGS = -std=c++11 -O3 -Wall -Wdeprecated -pedantic -g
+CXXFLAGS = -std=c++11 -O3 -Wall -Wdeprecated -pedantic -g $(DEBUG)
 LDFLAGS = -lm -lpthread
 
 PREFIX = /usr
@@ -30,6 +30,9 @@ PREFIX = /usr
 .PHONY: all clean
 
 all: $(BINARY)
+debug: $(BINARY)
+
+debug: DEBUG=-DDEBUG
 
 install: all
 	install -m 0755 $(BINARY) $(PREFIX)/sbin

@@ -26,7 +26,7 @@ Timer::Timer(std::function<void (void)>&& task, std::chrono::nanoseconds interva
 
 void Timer::run() {
     std::chrono::high_resolution_clock::time_point before, starttime;
-    std::chrono::nanoseconds interval, function_execution_time, sleep_time, real_sleep_time, full_time;
+    std::chrono::nanoseconds interval, function_execution_time, sleep_time, full_time;
     size_t n;
     n = n_;
     starttime = std::chrono::high_resolution_clock::now();
@@ -40,23 +40,25 @@ void Timer::run() {
 		}
         task_();
         function_execution_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
+        #ifdef DEBUG
         if (function_execution_time > interval) {
 			std::cerr << "Can't keep up!" << std::endl;
         }
+        #endif
         --n;
         sleep_time = interval - function_execution_time;
         if (sleep_time.count() > 0) {
+			#ifdef DEBUG
 			before = std::chrono::high_resolution_clock::now();
-			if (sleep_time > std::chrono::nanoseconds{5000000}) {
-				std::this_thread::sleep_for(sleep_time);
-			} else {
-				spinsleep::sleep_for(sleep_time);
-			}
-			real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
+			#endif
+			spinsleep::sleep_for(sleep_time);
+			#ifdef DEBUG
+			std::chrono::nanoseconds real_sleep_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - before);
 			double diff = ((double) real_sleep_time.count()) / ((double) sleep_time.count());
 			if (diff > 1.05 || diff < 0.95) {
 				fprintf(stderr, "Timer is off by %.02f%%!\n", (diff-1)*100);
 			}
+			#endif
 		}
     }
     full_time = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - starttime);

@@ -263,7 +263,7 @@ void DnsTester::display() {
 	/* Print results */
 	printf("Sent queries: %zu\n", tests_.size());
 	printf("Received answers: %u (%.02f%%)\n", num_received, ((double) num_received / tests_.size()) * 100);
-	printf("Valid answers: %u (%.02f%%)\n", num_answered, (double) num_answered / tests_.size());
+	printf("Valid answers: %u (%.02f%%)\n", num_answered, ((double) num_answered / tests_.size()) * 100);
 	printf("Average round-trip time: %.02f ms\n", average / 1000000.0);
 	printf("Standard deviation of the round-trip time: %.02f ms\n", standard_deviation / 1000000.0);
 }
