@@ -29,6 +29,7 @@
 #include <net/if.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <limits.h>
 
 TestException::TestException(std::string what): what_{what} {}
@@ -150,8 +151,8 @@ void DnsTester::test() {
 			std::cerr << "Can't send packet." << std::endl;
 		}
 		/* Store the time */
-		query.time_sent_ = std::chrono::high_resolution_clock::now();
 		m_.lock();
+		query.time_sent_ = std::chrono::high_resolution_clock::now();
 		num_sent_++;
 		m_.unlock();
 	}
@@ -211,9 +212,20 @@ void DnsTester::start() {
 			if ((ip & ((1 << (32-netmask_))-1)) >= num_req_) {
 				throw TestException{"Unexpected FQDN in question: too large."};
 			}
-			m_.lock();
+			std::lock_guard<std::mutex> lock{m_};
 			DnsQuery& query = tests_[(ip & (((uint64_t) 1 << (32-netmask_))-1))];
-			m_.unlock();
+			/* Receive time error handling */
+			if (query.time_sent_ > time_received) {
+				struct timespec ts;
+				std::stringstream ss;
+				ss << "Answer arrived for a query before it was sent. ";
+				if (ioctl(sock_, SIOCGSTAMPNS, &ts) == -1) {
+					ss << "Couldn't get kernel timestamp for packet: \"" << strerror(errno) << "\"";
+				} else {
+					ss << "Sent: " << std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count() << ", received: " << std::chrono::duration_cast<std::chrono::nanoseconds>(time_received.time_since_epoch()).count() << ", received by kernel: " << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}).count() << ", diff: " << std::chrono::duration_cast<std::chrono::nanoseconds>(time_received.time_since_epoch()).count() - std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}).count();
+				}
+				throw TestException{ss.str()};
+			}
 			/* Set the received flag true */
 			query.received_ = true;
 			/* Calculate the Round-Trip-Time */
