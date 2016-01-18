@@ -228,10 +228,10 @@ void DnsTester::start() {
 			}
 			/* Set the received flag true */
 			query.received_ = true;
-			/* Calculate the Round-Trip-Time */
-			query.rtt_ = std::chrono::duration_cast<std::chrono::nanoseconds>(time_received - query.time_sent_);
+			/* Set the received timestamp */
+			query.time_received_ = time_received;
 			/* Check whether there is an answer */
-			query.answered_ = answer.header_->qr() == 1 && answer.header_->rcode() == DNSHeader::RCODE::NoError && answer.header_->ancount() > 0 && query.rtt_ < (std::chrono::seconds{timeout_.tv_sec} + std::chrono::microseconds{timeout_.tv_usec});
+			query.answered_ = answer.header_->qr() == 1 && answer.header_->rcode() == DNSHeader::RCODE::NoError && answer.header_->ancount() > 0;
 		} else {
 			/* If the error is not caused by timeout, there is something wrong */
 			if (errno != EWOULDBLOCK) {
@@ -240,6 +240,14 @@ void DnsTester::start() {
 				throw TestException{ss.str()};
 			}
 		}
+	}
+	for (auto& query: tests_) {
+		/* Calculate the Round-Trip-Time */
+		if (query.received_) {
+			query.rtt_ = std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_received_ - query.time_sent_);
+		}
+		/* Adjust answer validity with timeout */
+		query.answered_ = query.answered_ && query.rtt_ < (std::chrono::seconds{timeout_.tv_sec} + std::chrono::microseconds{timeout_.tv_usec});
 	}
 }
 

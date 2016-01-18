@@ -66,6 +66,7 @@ class TestException: public std::exception
  */
 struct DnsQuery {
 		std::chrono::high_resolution_clock::time_point time_sent_; /**< Timestamp of the send time */
+		std::chrono::high_resolution_clock::time_point time_received_; /**< Timestamp of the receival */
 		bool received_; /**< Flag to mark whether an answer has been received */
 		bool answered_; /**< Flag to mark whether the answer was valid */
 		std::chrono::nanoseconds rtt_; /**< Round-trip time of the query */
