@@ -214,18 +214,6 @@ void DnsTester::start() {
 			}
 			std::lock_guard<std::mutex> lock{m_};
 			DnsQuery& query = tests_[(ip & (((uint64_t) 1 << (32-netmask_))-1))];
-			/* Receive time error handling */
-			if (query.time_sent_ > time_received) {
-				struct timespec ts;
-				std::stringstream ss;
-				ss << "Answer arrived for a query before it was sent. ";
-				if (ioctl(sock_, SIOCGSTAMPNS, &ts) == -1) {
-					ss << "Couldn't get kernel timestamp for packet: \"" << strerror(errno) << "\"";
-				} else {
-					ss << "Sent: " << std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count() << ", received: " << std::chrono::duration_cast<std::chrono::nanoseconds>(time_received.time_since_epoch()).count() << ", received by kernel: " << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}).count() << ", diff: " << std::chrono::duration_cast<std::chrono::nanoseconds>(time_received.time_since_epoch()).count() - std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}).count();
-				}
-				throw TestException{ss.str()};
-			}
 			/* Set the received flag true */
 			query.received_ = true;
 			/* Set the received timestamp */
@@ -308,7 +296,7 @@ void DnsTester::write(const char* filename) {
 	fprintf(fp, "number of requests: %u\n", num_req_);
 	fprintf(fp, "burst size: %u\n", num_burst_);
 	fprintf(fp, "delay between bursts: %lu ns\n\n", burst_delay_.count());
-	fprintf(fp, "query;tsent [ns];received;answered;rtt [ns]\n");
+	fprintf(fp, "query;tsent [ns];treceived [ns];received;answered;rtt [ns]\n");
 	/* Write queries */
 	char addr[64];
 	char query_addr[512];
@@ -318,7 +306,7 @@ void DnsTester::write(const char* filename) {
 		ip = ip_ | n++;
 		snprintf(addr, sizeof(addr), dns64_addr_format_string, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		snprintf(query_addr, sizeof(query_addr), "%s.%s.", addr, dns64_addr_domain);
-		fprintf(fp, "%s;%lu;%d;%d;%ld\n", query_addr, std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count(), query.received_, query.answered_, query.rtt_.count());
+		fprintf(fp, "%s;%lu;%lu;%d;%d;%ld\n", query_addr, std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_sent_.time_since_epoch()).count(), std::chrono::duration_cast<std::chrono::nanoseconds>(query.time_received_.time_since_epoch()).count(), query.received_, query.answered_, query.rtt_.count());
 	}
 	fclose(fp);
 }
