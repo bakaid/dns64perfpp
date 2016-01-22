@@ -134,7 +134,6 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip, ui
 
 void DnsTester::test() {
 	for (int i = 0; i < num_burst_; i++) {
-		m_.lock();
 		/* Get query store */
 		DnsQuery& query = tests_[num_sent_];
 		/* Modify the base query */
@@ -145,14 +144,13 @@ void DnsTester::test() {
 		memcpy(query_->labels_[0].begin_+1, label, strlen(label));
 		/* Modify the Transaction ID */
 		query_->header_->id(num_sent_ % (1 << 16));
-		m_.unlock();
 		/* Send the query */
 		if (::sendto(sock_, reinterpret_cast<const void*>(query_->begin_), query_->len_, 0, reinterpret_cast<const struct sockaddr*>(&server_), sizeof(server_)) != query_->len_) {
 			std::cerr << "Can't send packet." << std::endl;
 		}
 		/* Store the time */
-		m_.lock();
 		query.time_sent_ = std::chrono::high_resolution_clock::now();
+		m_.lock();
 		num_sent_++;
 		m_.unlock();
 	}
@@ -212,7 +210,6 @@ void DnsTester::start() {
 			if ((ip & ((1 << (32-netmask_))-1)) >= num_req_) {
 				throw TestException{"Unexpected FQDN in question: too large."};
 			}
-			std::lock_guard<std::mutex> lock{m_};
 			DnsQuery& query = tests_[(ip & (((uint64_t) 1 << (32-netmask_))-1))];
 			/* Set the received flag true */
 			query.received_ = true;
