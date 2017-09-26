@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -43,12 +43,16 @@ DnsQuery::DnsQuery()
 
 DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
                      uint8_t netmask, uint32_t num_req, uint32_t num_burst,
+                     uint32_t num_thread, uint32_t thread_id,
                      std::chrono::nanoseconds burst_delay,
                      struct timeval timeout)
-    : ip_{ip}, netmask_{netmask}, num_req_{num_req}, num_burst_{num_burst},
+    : ip_{ip}, netmask_{netmask}, num_req_{num_req / num_thread},
+      num_burst_{num_burst}, num_thread_{num_thread}, thread_id_{thread_id},
       burst_delay_{burst_delay}, num_sent_{0} {
   /* Set timeout */
   timeout_ = timeout;
+  /* Calculate offset */
+  num_offset_ = thread_id_ * num_req_;
   /* Fill server sockaddr structure */
   memset(&server_, 0x00, sizeof(server_));
   server_.sin6_family = AF_INET6;
@@ -83,7 +87,7 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
   /* Preallocate the test queries */
   tests_.reserve(num_req_);
   /* Create the test queries */
-  for (int i = 0; i < num_req_; i++) {
+  for (uint32_t i = 0; i < num_req_; i++) {
     tests_.push_back(DnsQuery{});
   }
   /* Creating the base query */
@@ -132,18 +136,18 @@ DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
 }
 
 void DnsTester::test() {
-  for (int i = 0; i < num_burst_; i++) {
+  for (uint32_t i = 0; i < num_burst_; i++) {
     /* Get query store */
     DnsQuery &query = tests_[num_sent_];
     /* Modify the base query */
     /* Modify the label */
     char label[64];
-    uint32_t ip = ip_ | num_sent_;
+    uint32_t ip = ip_ | (num_sent_ + num_offset_);
     snprintf(label, sizeof(label), dns64_addr_format_string, (ip >> 24) & 0xff,
              (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
     memcpy(query_->labels_[0].begin_ + 1, label, strlen(label));
     /* Modify the Transaction ID */
-    query_->header_->id(num_sent_ % (1 << 16));
+    query_->header_->id((num_sent_ + num_offset_) % (1 << 16));
     /* Send the query */
     if (::sendto(sock_, reinterpret_cast<const void *>(query_->begin_),
                  query_->len_, 0,
@@ -161,9 +165,9 @@ void DnsTester::test() {
 
 void DnsTester::start() {
   /* Starting test packet sending */
-  timer_ = std::unique_ptr<Timer>{new Timer{std::bind(&DnsTester::test, this),
-                                            burst_delay_,
-                                            (size_t)(num_req_ / num_burst_)}};
+  timer_ = std::unique_ptr<Timer>{new Timer{
+      "Sender " + std::to_string(thread_id_), std::bind(&DnsTester::test, this),
+      burst_delay_, (size_t)(num_req_ / num_burst_)}};
   timer_->start();
   /* Receiving answers */
   struct sockaddr_in6 sender;
@@ -225,10 +229,13 @@ void DnsTester::start() {
         throw TestException{"Invalid question."};
       }
       ip = (temp[0] << 24) | (temp[1] << 16) | (temp[2] << 8) | temp[3];
-      if ((ip & ((1 << (32 - netmask_)) - 1)) >= num_req_) {
+      auto fqdn = ip & (((uint64_t)1 << (32 - netmask_)) - 1);
+      if (fqdn < num_offset_) {
+        throw TestException{"Unexpected FQDN in question: too small."};
+      } else if (fqdn >= (num_offset_ + num_req_)) {
         throw TestException{"Unexpected FQDN in question: too large."};
       }
-      DnsQuery &query = tests_[(ip & (((uint64_t)1 << (32 - netmask_)) - 1))];
+      DnsQuery &query = tests_[fqdn - num_offset_];
       /* Set the received flag true */
       query.received_ = true;
       /* Set the received timestamp */
@@ -246,6 +253,7 @@ void DnsTester::start() {
       }
     }
   }
+  timer_->stop();
   for (auto &query : tests_) {
     /* Calculate the Round-Trip-Time */
     if (query.received_) {
@@ -260,86 +268,109 @@ void DnsTester::start() {
   }
 }
 
-void DnsTester::display() {
-  uint32_t num_received, num_answered;
+DnsTesterAggregator::DnsTesterAggregator(
+    const std::vector<std::unique_ptr<DnsTester>> &dns_testers)
+    : dns_testers_(dns_testers) {}
+
+void DnsTesterAggregator::display() {
+  uint32_t num_received, num_answered, num_total;
   double average, standard_deviation;
+  num_total = 0;
   num_received = 0;
   num_answered = 0;
   /* Number of received and answered queries */
-  for (auto &query : tests_) {
-    if (query.received_) {
-      num_received++;
-    }
-    if (query.answered_) {
-      num_answered++;
+  for (const auto &tester : dns_testers_) {
+    for (const auto &query : tester->tests_) {
+      num_total++;
+      if (query.received_) {
+        num_received++;
+      }
+      if (query.answered_) {
+        num_answered++;
+      }
     }
   }
   /* Average */
   average = 0;
-  for (auto &query : tests_) {
-    if (query.received_) {
-      average += (double)query.rtt_.count() / num_received;
+  for (const auto &tester : dns_testers_) {
+    for (const auto &query : tester->tests_) {
+      if (query.received_) {
+        average += (double)query.rtt_.count() / num_received;
+      }
     }
   }
   /* Standard deviation */
   standard_deviation = 0;
-  for (auto &query : tests_) {
-    if (query.received_) {
-      standard_deviation += pow(query.rtt_.count() - average, 2.0);
+  for (const auto &tester : dns_testers_) {
+    for (auto &query : tester->tests_) {
+      if (query.received_) {
+        standard_deviation += pow(query.rtt_.count() - average, 2.0);
+      }
     }
   }
   standard_deviation = sqrt(standard_deviation / num_received);
   /* Print results */
-  printf("Sent queries: %zu\n", tests_.size());
+  printf("Sent queries: %u\n", num_total);
   printf("Received answers: %u (%.02f%%)\n", num_received,
-         ((double)num_received / tests_.size()) * 100);
+         ((double)num_received / num_total) * 100);
   printf("Valid answers: %u (%.02f%%)\n", num_answered,
-         ((double)num_answered / tests_.size()) * 100);
+         ((double)num_answered / num_total) * 100);
   printf("Average round-trip time: %.02f ms\n", average / 1000000.0);
   printf("Standard deviation of the round-trip time: %.02f ms\n",
          standard_deviation / 1000000.0);
 }
 
-void DnsTester::write(const char *filename) {
-  FILE *fp;
+void DnsTesterAggregator::write(const char *filename) {
+  const auto &first_tester = dns_testers_[0];
   char server[INET6_ADDRSTRLEN];
   /* Convert server address to string */
-  if (inet_ntop(AF_INET6, reinterpret_cast<const void *>(&server_.sin6_addr),
-                server, sizeof(server)) == NULL) {
+  if (inet_ntop(
+          AF_INET6,
+          reinterpret_cast<const void *>(&first_tester->server_.sin6_addr),
+          server, sizeof(server)) == NULL) {
     std::stringstream ss;
     ss << "Bad server address: " << strerror(errno);
     throw TestException{ss.str()};
   }
   /* Open file */
+  FILE *fp;
   if ((fp = fopen(filename, "w")) == nullptr) {
     throw TestException{"Can't open file"};
   }
   /* Write header */
   fprintf(fp, "%s\n", "dns64perf++ test parameters");
   fprintf(fp, "server: %s\n", server);
-  fprintf(fp, "port: %hu\n", ntohs(server_.sin6_port));
-  fprintf(fp, "number of requests: %u\n", num_req_);
-  fprintf(fp, "burst size: %u\n", num_burst_);
-  fprintf(fp, "delay between bursts: %lu ns\n\n", burst_delay_.count());
-  fprintf(fp, "query;tsent [ns];treceived [ns];received;answered;rtt [ns]\n");
+  fprintf(fp, "port: %hu\n", ntohs(first_tester->server_.sin6_port));
+  fprintf(fp, "number of requests: %u\n",
+          first_tester->num_req_ * first_tester->num_thread_);
+  fprintf(fp, "burst size: %u\n", first_tester->num_burst_);
+  fprintf(fp, "number of threads: %u\n", first_tester->num_thread_);
+  fprintf(fp, "delay between bursts: %lu ns\n\n",
+          first_tester->burst_delay_.count());
+  fprintf(
+      fp,
+      "query;thread id;tsent [ns];treceived [ns];received;answered;rtt [ns]\n");
   /* Write queries */
   char addr[64];
   char query_addr[512];
   uint32_t ip;
-  int n = 0;
-  for (auto &query : tests_) {
-    ip = ip_ | n++;
-    snprintf(addr, sizeof(addr), dns64_addr_format_string, (ip >> 24) & 0xff,
-             (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
-    snprintf(query_addr, sizeof(query_addr), "%s.%s.", addr, dns64_addr_domain);
-    fprintf(fp, "%s;%lu;%lu;%d;%d;%ld\n", query_addr,
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                query.time_sent_.time_since_epoch())
-                .count(),
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                query.time_received_.time_since_epoch())
-                .count(),
-            query.received_, query.answered_, query.rtt_.count());
+  for (const auto &tester : dns_testers_) {
+    int n = 0;
+    for (const auto &query : tester->tests_) {
+      ip = tester->ip_ | (tester->num_offset_ + n++);
+      snprintf(addr, sizeof(addr), dns64_addr_format_string, (ip >> 24) & 0xff,
+               (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+      snprintf(query_addr, sizeof(query_addr), "%s.%s.", addr,
+               dns64_addr_domain);
+      fprintf(fp, "%s;%u;%lu;%lu;%d;%d;%ld\n", query_addr, tester->thread_id_,
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  query.time_sent_.time_since_epoch())
+                  .count(),
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  query.time_received_.time_since_epoch())
+                  .count(),
+              query.received_, query.answered_, query.rtt_.count());
+    }
   }
   fclose(fp);
 }

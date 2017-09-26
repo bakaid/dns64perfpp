@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -36,6 +36,7 @@
  */
 class Timer {
 private:
+  std::string thread_name_;
   std::function<void(void)>
       task_; /**< std::function polymorphic template to store the task */
   std::chrono::nanoseconds interval_; /**< Timer interval in nanoseconds */
@@ -55,8 +56,8 @@ public:
    * @param interval timer interval in nanoseconds
    * @param n number of time to repeat
    */
-  Timer(std::function<void(void)> &&task, std::chrono::nanoseconds interval,
-        size_t n);
+  Timer(const std::string &thread_name, std::function<void(void)> &&task,
+        std::chrono::nanoseconds interval, size_t n);
 
   /**
    * Destructor.

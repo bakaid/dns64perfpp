@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -87,6 +87,9 @@ private:
   uint8_t netmask_;            /**< Netmask part of the subnet */
   uint32_t num_req_;           /**< Number of requests */
   uint32_t num_burst_;         /**< Burst size */
+  uint32_t num_thread_;        /**< Number of threads */
+  uint32_t thread_id_;         /**< Thread id of this tester */
+  uint32_t num_offset_;        /**< IP offset of this tester */
   std::chrono::nanoseconds
       burst_delay_; /**< Time between bursts in nanoseconds */
   struct timeval timeout_;
@@ -98,6 +101,8 @@ private:
   uint32_t num_sent_;            /**< Number of sent queries so far */
   std::mutex m_;                 /**< Mutex for accessing queries */
   std::unique_ptr<Timer> timer_; /**< Timer for scheduling queries */
+
+  friend class DnsTesterAggregator;
 
   /**
    * Sends a burst
@@ -116,20 +121,34 @@ public:
    */
   DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
             uint8_t netmask, uint32_t num_req, uint32_t num_burst,
+            uint32_t thread_num, uint32_t thread_id,
             std::chrono::nanoseconds burst_delay, struct timeval timeout);
 
   /**
    * Starts the test
    */
   void start();
+};
+
+class DnsTesterAggregator {
+private:
+  const std::vector<std::unique_ptr<DnsTester>> &dns_testers_;
+
+public:
+  /**
+   * Constructor.
+   * @param dns_testers DnsTesters to aggregate from
+   */
+  DnsTesterAggregator(
+      const std::vector<std::unique_ptr<DnsTester>> &dns_testers);
 
   /**
-   * Displays the test results
+   * Displays the aggregated test results
    */
   void display();
 
   /**
-   * Writes the test results to a file.
+   * Writes the aggregated test results to a file.
    * @param filename the file to write to
    */
   void write(const char *filename);

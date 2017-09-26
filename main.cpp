@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,22 +27,24 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <memory>
 #include <net/if.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <thread>
 
 int main(int argc, char *argv[]) {
   struct in6_addr server_addr;
   uint16_t port;
   uint32_t ip;
   uint8_t netmask;
-  uint32_t num_req, num_burst;
+  uint32_t num_req, num_burst, num_thread;
   uint64_t burst_delay;
   struct timeval timeout;
-  if (argc < 8) {
+  if (argc < 9) {
     std::cerr << "Usage: dns64perf++ <server> <port> <subnet> <number of "
-                 "requests> <burst size> <delay between bursts in ns> <timeout "
-                 "in s>"
+                 "requests> <burst size> <number of threads> <delay between "
+                 "bursts in ns> <timeout in s>"
               << std::endl;
     return -1;
   }
@@ -87,32 +89,53 @@ int main(int argc, char *argv[]) {
     std::cerr << "Bad burst size, must be between 0 and 2^32." << std::endl;
     return -1;
   }
-  /* Burst size */
-  if (sscanf(argv[6], "%lu", &burst_delay) != 1) {
+  /* Number of threads */
+  if (sscanf(argv[6], "%u", &num_thread) != 1) {
+    std::cerr << "Bad number of threads size, must be between 0 and 2^32."
+              << std::endl;
+    return -1;
+  }
+  /* Sanity check */
+  if (num_req % (num_thread * num_burst) != 0) {
+    std::cerr << "Number of requests must be divisble by (number of threads * "
+                 "burst size)"
+              << std::endl;
+    return -1;
+  }
+  /* Burst delay */
+  if (sscanf(argv[7], "%lu", &burst_delay) != 1) {
     std::cerr << "Bad delay between bursts." << std::endl;
     return -1;
   }
   /* Timeout */
   double timeout_, s, us;
-  if (sscanf(argv[7], "%lf", &timeout_) != 1) {
+  if (sscanf(argv[8], "%lf", &timeout_) != 1) {
     std::cerr << "Bad timeout." << std::endl;
     return -1;
   }
   us = modf(timeout_, &s) * 1000000;
   timeout.tv_sec = (time_t)s;
   timeout.tv_usec = (suseconds_t)us;
+
+  std::vector<std::unique_ptr<DnsTester>> testers;
+  std::vector<std::thread> threads;
+  for (uint32_t i = 0; i < num_thread; i++) {
+    testers.emplace_back(std::make_unique<DnsTester>(
+        server_addr, port, ip, netmask, num_req, num_burst, num_thread, i,
+        std::chrono::nanoseconds{burst_delay}, timeout));
+  }
   try {
-    DnsTester tester{server_addr,
-                     port,
-                     ip,
-                     netmask,
-                     num_req,
-                     num_burst,
-                     std::chrono::nanoseconds{burst_delay},
-                     timeout};
-    tester.start();
-    tester.display();
-    tester.write("dns64perf.csv");
+    for (uint32_t i = 0; i < num_thread; i++) {
+      threads.emplace_back([&, i]() { testers[i]->start(); });
+      pthread_setname_np(threads.back().native_handle(),
+                         ("Receiver " + std::to_string(i)).c_str());
+    }
+    for (uint32_t i = 0; i < num_thread; i++) {
+      threads[i].join();
+    }
+    DnsTesterAggregator aggregator(testers);
+    aggregator.display();
+    aggregator.write("dns64perf.csv");
   } catch (std::exception &e) {
     std::cerr << e.what() << std::endl;
   }

@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License

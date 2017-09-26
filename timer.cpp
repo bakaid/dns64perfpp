@@ -1,7 +1,7 @@
-/* dns64perf++ - C++11 DNS64 performance tester
+/* dns64perf++ - C++14 DNS64 performance tester
  * Based on dns64perf by Gabor Lencse <lencse@sze.hu>
- * (http://ipv6.tilb.sze.hu/dns64perf/) Copyright (C) 2015  Daniel Bakai
- * <bakaid@kszk.bme.hu>
+ * (http://ipv6.tilb.sze.hu/dns64perf/)
+ * Copyright (C) 2017  Daniel Bakai <bakaid@kszk.bme.hu>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,9 +24,10 @@
 #include "spin_sleep.hpp"
 #include <iostream>
 
-Timer::Timer(std::function<void(void)> &&task,
+Timer::Timer(const std::string &threadName, std::function<void(void)> &&task,
              std::chrono::nanoseconds interval, size_t n)
-    : task_{task}, interval_{interval}, n_{n}, stop_{false} {}
+    : thread_name_{threadName}, task_{task}, interval_{interval}, n_{n},
+      stop_{false} {}
 
 void Timer::run() {
   std::chrono::high_resolution_clock::time_point before, starttime;
@@ -80,9 +81,16 @@ void Timer::run() {
           ((double)full_time.count() / (n_ * interval_.count())) * 100);
 }
 
-Timer::~Timer() { thread_.join(); }
+Timer::~Timer() {
+  if (!stop_) {
+    thread_.join();
+  }
+}
 
-void Timer::start() { thread_ = std::thread{&Timer::run, this}; }
+void Timer::start() {
+  thread_ = std::thread{&Timer::run, this};
+  pthread_setname_np(thread_.native_handle(), thread_name_.c_str());
+}
 
 void Timer::stop() {
   if (!stop_) {
