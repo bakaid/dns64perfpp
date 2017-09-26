@@ -119,9 +119,12 @@ int main(int argc, char *argv[]) {
 
   std::vector<std::unique_ptr<DnsTester>> testers;
   std::vector<std::thread> threads;
+  auto reference_time =
+      std::chrono::high_resolution_clock::now() + std::chrono::seconds(2);
   for (uint32_t i = 0; i < num_thread; i++) {
     testers.emplace_back(std::make_unique<DnsTester>(
         server_addr, port, ip, netmask, num_req, num_burst, num_thread, i,
+        reference_time + std::chrono::nanoseconds{burst_delay / num_thread} * i,
         std::chrono::nanoseconds{burst_delay}, timeout));
   }
   try {

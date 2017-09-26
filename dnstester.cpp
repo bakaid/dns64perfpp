@@ -20,6 +20,7 @@
  */
 
 #include "dnstester.h"
+#include "spin_sleep.hpp"
 #include <arpa/inet.h>
 #include <cmath>
 #include <cstdio>
@@ -41,14 +42,17 @@ const char *TestException::what() const noexcept { return what_.c_str(); }
 DnsQuery::DnsQuery()
     : received_{false}, answered_{false}, rtt_{std::chrono::nanoseconds{-1}} {}
 
-DnsTester::DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
-                     uint8_t netmask, uint32_t num_req, uint32_t num_burst,
-                     uint32_t num_thread, uint32_t thread_id,
-                     std::chrono::nanoseconds burst_delay,
-                     struct timeval timeout)
+DnsTester::DnsTester(
+    struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask,
+    uint32_t num_req, uint32_t num_burst, uint32_t num_thread,
+    uint32_t thread_id,
+    const std::chrono::time_point<std::chrono::high_resolution_clock>
+        &test_start_time,
+    std::chrono::nanoseconds burst_delay, struct timeval timeout)
     : ip_{ip}, netmask_{netmask}, num_req_{num_req / num_thread},
       num_burst_{num_burst}, num_thread_{num_thread}, thread_id_{thread_id},
-      burst_delay_{burst_delay}, num_sent_{0} {
+      test_start_time_{test_start_time}, burst_delay_{burst_delay}, num_sent_{
+                                                                        0} {
   /* Set timeout */
   timeout_ = timeout;
   /* Calculate offset */
@@ -165,9 +169,11 @@ void DnsTester::test() {
 
 void DnsTester::start() {
   /* Starting test packet sending */
-  timer_ = std::unique_ptr<Timer>{new Timer{
-      "Sender " + std::to_string(thread_id_), std::bind(&DnsTester::test, this),
-      burst_delay_, (size_t)(num_req_ / num_burst_)}};
+  timer_ = std::unique_ptr<Timer>{
+      new Timer{"Sender " + std::to_string(thread_id_),
+                [&]() { spinsleep::sleep_until(test_start_time_); },
+                std::bind(&DnsTester::test, this), burst_delay_,
+                (size_t)(num_req_ / num_burst_)}};
   timer_->start();
   /* Receiving answers */
   struct sockaddr_in6 sender;

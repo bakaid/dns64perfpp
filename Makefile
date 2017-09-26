@@ -19,7 +19,7 @@
  
 
 BINARY = dns64perf++
-OBJECTS = main.o timer.o dns.o dnstester.o raii_socket.o
+OBJECTS = main.o timer.o dns.o dnstester.o raii_socket.o spin_sleep.o
 HEADERS = timer.h dns.h dnstester.h raii_socket.h spin_sleep.hpp
 
 CXX = clang++

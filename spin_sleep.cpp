@@ -19,22 +19,13 @@
  * USA.
  */
 
-#ifndef SPIN_SLEEP_H_INCLUDED_
-#define SPIN_SLEEP_H_INCLUDED_
-
-#include <chrono>
+#include "spin_sleep.hpp"
 
 namespace spinsleep {
-template <class Rep, class Period>
-void sleep_for(const std::chrono::duration<Rep, Period> &sleep_duration) {
-  auto test = std::chrono::high_resolution_clock::now() + sleep_duration;
-  while (std::chrono::high_resolution_clock::now() < test)
-    ;
-}
-
 void sleep_until(
     const std::chrono::time_point<std::chrono::high_resolution_clock>
-        &sleep_target);
-}; // namespace spinsleep
-
-#endif
+        &sleep_target) {
+  while (std::chrono::high_resolution_clock::now() < sleep_target)
+    ;
+}
+} // namespace spinsleep

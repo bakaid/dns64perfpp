@@ -38,6 +38,8 @@ class Timer {
 private:
   std::string thread_name_;
   std::function<void(void)>
+      prepare_; /**< function to run once vefore repeating the task */
+  std::function<void(void)>
       task_; /**< std::function polymorphic template to store the task */
   std::chrono::nanoseconds interval_; /**< Timer interval in nanoseconds */
   size_t n_;                          /**< Number of times to repeat */
@@ -56,8 +58,9 @@ public:
    * @param interval timer interval in nanoseconds
    * @param n number of time to repeat
    */
-  Timer(const std::string &thread_name, std::function<void(void)> &&task,
-        std::chrono::nanoseconds interval, size_t n);
+  Timer(const std::string &thread_name, std::function<void(void)> &&prepare,
+        std::function<void(void)> &&task, std::chrono::nanoseconds interval,
+        size_t n);
 
   /**
    * Destructor.

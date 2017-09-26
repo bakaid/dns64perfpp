@@ -24,16 +24,20 @@
 #include "spin_sleep.hpp"
 #include <iostream>
 
-Timer::Timer(const std::string &threadName, std::function<void(void)> &&task,
+Timer::Timer(const std::string &threadName, std::function<void(void)> &&prepare,
+             std::function<void(void)> &&task,
              std::chrono::nanoseconds interval, size_t n)
-    : thread_name_{threadName}, task_{task}, interval_{interval}, n_{n},
-      stop_{false} {}
+    : thread_name_{threadName}, prepare_{prepare}, task_{task},
+      interval_{interval}, n_{n}, stop_{false} {}
 
 void Timer::run() {
   std::chrono::high_resolution_clock::time_point before, starttime;
   std::chrono::nanoseconds interval, function_execution_time, sleep_time,
       full_time;
   size_t n;
+
+  prepare_();
+
   n = n_;
   starttime = std::chrono::high_resolution_clock::now();
   while (!stop_ && n > 0) {
