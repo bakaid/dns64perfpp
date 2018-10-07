@@ -26,6 +26,8 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <errno.h>
+#include <fcntl.h>
 #include <iostream>
 #include <limits.h>
 #include <net/if.h>
@@ -39,13 +41,14 @@ TestException::TestException(std::string what) : what_{what} {}
 
 const char *TestException::what() const noexcept { return what_.c_str(); }
 
-DnsQuery::DnsQuery()
-    : received_{false}, answered_{false}, rtt_{std::chrono::nanoseconds{-1}} {}
+DnsQuery::DnsQuery(uint16_t socket_index)
+    : socket_index_{socket_index}, received_{false}, answered_{false},
+      rtt_{std::chrono::nanoseconds{-1}} {}
 
 DnsTester::DnsTester(
     struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask,
     uint32_t num_req, uint32_t num_burst, uint32_t num_thread,
-    uint32_t thread_id,
+    uint32_t thread_id, uint16_t num_ports,
     const std::chrono::time_point<std::chrono::high_resolution_clock>
         &test_start_time,
     std::chrono::nanoseconds burst_delay, struct timeval timeout)
@@ -53,6 +56,8 @@ DnsTester::DnsTester(
       num_burst_{num_burst}, num_thread_{num_thread}, thread_id_{thread_id},
       test_start_time_{test_start_time}, burst_delay_{burst_delay}, num_sent_{
                                                                         0} {
+  /* Reserve space for answer data */
+  answer_data_.resize(UDP_MAX_LEN);
   /* Set timeout */
   timeout_ = timeout;
   /* Calculate offset */
@@ -62,37 +67,74 @@ DnsTester::DnsTester(
   server_.sin6_family = AF_INET6;
   server_.sin6_addr = server_addr;
   server_.sin6_port = htons(port);
-  /* Create socket */
-  int sockfd;
-  if ((sockfd = ::socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-    std::stringstream ss;
-    ss << "Cannot create socket: " << strerror(errno);
-    throw TestException{ss.str()};
+  /* Bind sockets */
+  uint16_t base_port = 10000U;
+  while (sockets_.size() < (num_ports == 0U ? 1U : num_ports)) {
+    /* Create socket */
+    int sockfd;
+    if ((sockfd = ::socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+      std::stringstream ss;
+      ss << "Cannot create socket: " << strerror(errno);
+      throw TestException{ss.str()};
+    }
+    /* Bind socket */
+    struct sockaddr_in6 local_addr;
+    memset(&local_addr, 0x00, sizeof(local_addr));
+    local_addr.sin6_family = AF_INET6;         // IPv6
+    local_addr.sin6_addr = in6addr_any;        // To any valid IP address
+    local_addr.sin6_port = htons(base_port++); // Get a new port
+    if (::bind(sockfd, reinterpret_cast<struct sockaddr *>(&local_addr),
+               sizeof(local_addr)) == -1) {
+      if (errno == EADDRINUSE) {
+        ::close(sockfd);
+        continue;
+      }
+      std::stringstream ss;
+      ss << "Unable to bind socket: " << strerror(errno);
+      ::close(sockfd);
+      throw TestException{ss.str()};
+    }
+    if (num_ports == 0U) {
+      /* Set socket timeout */
+      if (::setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                       reinterpret_cast<const void *>(&timeout_),
+                       sizeof(timeout_))) {
+        ::close(sockfd);
+        throw TestException("Cannot set timeout: setsockopt failed");
+      }
+    } else {
+      /* Set socket nonblocking */
+      int flags = fcntl(sockfd, F_GETFL);
+      if (flags < 0) {
+        std::stringstream ss;
+        ss << "F_GETFL failed: " << strerror(errno);
+        ::close(sockfd);
+        throw TestException{ss.str()};
+      }
+      if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        std::stringstream ss;
+        ss << "F_SETFL failed: " << strerror(errno);
+        ::close(sockfd);
+        throw TestException{ss.str()};
+      }
+    }
+    sockets_.emplace_back(sockfd);
   }
-  sock_ = Socket{sockfd};
-  /* Bind socket */
-  struct sockaddr_in6 local_addr;
-  memset(&local_addr, 0x00, sizeof(local_addr));
-  local_addr.sin6_family = AF_INET6;  // IPv6
-  local_addr.sin6_addr = in6addr_any; // To any valid IP address
-  local_addr.sin6_port = htons(0);    // Get a random port
-  if (::bind(sock_, reinterpret_cast<struct sockaddr *>(&local_addr),
-             sizeof(local_addr)) == -1) {
-    std::stringstream ss;
-    ss << "Unable to bind socket: " << strerror(errno);
-    throw TestException{ss.str()};
-  }
-  /* Set socket timeout */
-  if (::setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO,
-                   reinterpret_cast<const void *>(&timeout_),
-                   sizeof(timeout_))) {
-    throw TestException("Cannot set timeout: setsockopt failed");
+  if (num_ports > 0U) {
+    /* Fill pollfds */
+    pollfds_.resize(num_ports);
+    for (size_t i = 0; i < num_ports; i++) {
+      pollfds_[i].fd = sockets_[i];
+      pollfds_[i].events = POLLIN;
+      pollfds_[i].revents = 0;
+    }
   }
   /* Preallocate the test queries */
   tests_.reserve(num_req_);
   /* Create the test queries */
   for (uint32_t i = 0; i < num_req_; i++) {
-    tests_.push_back(DnsQuery{});
+    tests_.push_back(DnsQuery{
+        static_cast<uint16_t>(i % (num_ports == 0U ? 1U : num_ports))});
   }
   /* Creating the base query */
   memset(query_data_, 0x00, sizeof(query_data_));
@@ -153,17 +195,91 @@ void DnsTester::test() {
     /* Modify the Transaction ID */
     query_->header_->id((num_sent_ + num_offset_) % (1 << 16));
     /* Send the query */
-    if (::sendto(sock_, reinterpret_cast<const void *>(query_->begin_),
-                 query_->len_, 0,
-                 reinterpret_cast<const struct sockaddr *>(&server_),
-                 sizeof(server_)) != query_->len_) {
-      std::cerr << "Can't send packet." << std::endl;
+    ssize_t sent;
+    while ((sent = ::sendto(sockets_[query.socket_index_],
+                            reinterpret_cast<const void *>(query_->begin_),
+                            query_->len_, 0,
+                            reinterpret_cast<const struct sockaddr *>(&server_),
+                            sizeof(server_))) != query_->len_) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        std::cerr << "Can't send packet." << std::endl;
+        break;
+      }
     }
     /* Store the time */
     query.time_sent_ = std::chrono::high_resolution_clock::now();
     m_.lock();
     num_sent_++;
     m_.unlock();
+  }
+}
+
+inline void DnsTester::receive(uint16_t socket_index) {
+  struct sockaddr_in6 sender;
+  socklen_t sender_len;
+  ssize_t recvlen;
+  memset(&sender, 0x00, sizeof(sender));
+  sender_len = sizeof(sender);
+  if ((recvlen = ::recvfrom(
+           sockets_[socket_index], answer_data_.data(), answer_data_.size(), 0,
+           reinterpret_cast<struct sockaddr *>(&sender), &sender_len)) > 0) {
+    /* Get the time of the receipt */
+    std::chrono::high_resolution_clock::time_point time_received =
+        std::chrono::high_resolution_clock::now();
+    /* Test whether the answer came from the DUT */
+    if (memcmp(reinterpret_cast<const void *>(&sender.sin6_addr),
+               reinterpret_cast<const void *>(&server_.sin6_addr),
+               sizeof(struct in6_addr)) != 0 ||
+        sender.sin6_port != server_.sin6_port) {
+      char sender_text[INET6_ADDRSTRLEN];
+      inet_ntop(AF_INET6, reinterpret_cast<const void *>(&sender.sin6_addr),
+                sender_text, sizeof(sender_text));
+      std::stringstream ss;
+      ss << "Received packet from other host than the DUT: [" << sender_text
+         << "]:" << ntohs(sender.sin6_port);
+      throw TestException{ss.str()};
+    }
+    /* Parse the answer */
+    DNSPacket answer{answer_data_.data(), (size_t)recvlen, answer_data_.size()};
+    /* Test whether the query is valid */
+    if (answer.header_->qdcount() < 1) {
+      /* It is invalid */
+      return;
+    }
+    /* Find the corresponding query */
+    char label[64];
+    uint32_t ip;
+    uint8_t temp[4];
+    strncpy(label, (const char *)answer.labels_[0].begin_ + 1,
+            answer.labels_[0].length());
+    label[answer.labels_[0].length()] = '\0';
+    if (sscanf(label, dns64_addr_format_string, temp, temp + 1, temp + 2,
+               temp + 3) != 4) {
+      throw TestException{"Invalid question."};
+    }
+    ip = (temp[0] << 24) | (temp[1] << 16) | (temp[2] << 8) | temp[3];
+    auto fqdn = ip & (((uint64_t)1 << (32 - netmask_)) - 1);
+    if (fqdn < num_offset_) {
+      throw TestException{"Unexpected FQDN in question: too small."};
+    } else if (fqdn >= (num_offset_ + num_req_)) {
+      throw TestException{"Unexpected FQDN in question: too large."};
+    }
+    DnsQuery &query = tests_[fqdn - num_offset_];
+    /* Set the received flag true */
+    query.received_ = true;
+    /* Set the received timestamp */
+    query.time_received_ = time_received;
+    /* Check whether there is an answer */
+    query.answered_ = answer.header_->qr() == 1 &&
+                      answer.header_->rcode() == DNSHeader::RCODE::NoError &&
+                      answer.header_->ancount() > 0;
+  } else {
+    /* If the error is not caused by timeout, there is something wrong */
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      std::stringstream ss;
+      ss << "Error in recvfrom: " << strerror(errno);
+      throw TestException{ss.str()};
+    }
   }
 }
 
@@ -176,10 +292,6 @@ void DnsTester::start() {
                 (size_t)(num_req_ / num_burst_)}};
   timer_->start();
   /* Receiving answers */
-  struct sockaddr_in6 sender;
-  socklen_t sender_len;
-  ssize_t recvlen;
-  uint8_t answer_data[UDP_MAX_LEN];
   bool continue_receiving;
   std::chrono::time_point<std::chrono::high_resolution_clock> receive_until;
 
@@ -189,74 +301,37 @@ void DnsTester::start() {
     m_.lock();
     size_t remaining = num_req_ - num_sent_;
     m_.unlock();
-    if (remaining == 0) {
+    if (continue_receiving && remaining == 0) {
       continue_receiving = false;
       receive_until = std::chrono::high_resolution_clock::now() +
                       std::chrono::seconds{timeout_.tv_sec} +
                       std::chrono::microseconds{timeout_.tv_usec};
     }
-    memset(&sender, 0x00, sizeof(sender));
-    sender_len = sizeof(sender);
-    if ((recvlen = ::recvfrom(sock_, answer_data, sizeof(answer_data), 0,
-                              reinterpret_cast<struct sockaddr *>(&sender),
-                              &sender_len)) > 0) {
-      /* Get the time of the receipt */
-      std::chrono::high_resolution_clock::time_point time_received =
-          std::chrono::high_resolution_clock::now();
-      /* Test whether the answer came from the DUT */
-      if (memcmp(reinterpret_cast<const void *>(&sender.sin6_addr),
-                 reinterpret_cast<const void *>(&server_.sin6_addr),
-                 sizeof(struct in6_addr)) != 0 ||
-          sender.sin6_port != server_.sin6_port) {
-        char sender_text[INET6_ADDRSTRLEN];
-        inet_ntop(AF_INET6, reinterpret_cast<const void *>(&sender.sin6_addr),
-                  sender_text, sizeof(sender_text));
+    if (pollfds_.size() > 0U) {
+      int ret = ::poll(pollfds_.data(), static_cast<nfds_t>(pollfds_.size()),
+                       200 /*ms*/);
+      if (ret < 0) {
         std::stringstream ss;
-        ss << "Received packet from other host than the DUT: [" << sender_text
-           << "]:" << ntohs(sender.sin6_port);
+        ss << "Error on poll() " << strerror(errno);
         throw TestException{ss.str()};
       }
-      /* Parse the answer */
-      DNSPacket answer{answer_data, (size_t)recvlen, sizeof(answer_data)};
-      /* Test whether the query is valid */
-      if (answer.header_->qdcount() < 1) {
-        /* It is invalid, continue */
+      if (ret == 0) {
+        /* Timeout */
         continue;
       }
-      /* Find the corresponding query */
-      char label[64];
-      uint32_t ip;
-      uint8_t temp[4];
-      strncpy(label, (const char *)answer.labels_[0].begin_ + 1,
-              answer.labels_[0].length());
-      label[answer.labels_[0].length()] = '\0';
-      if (sscanf(label, dns64_addr_format_string, temp, temp + 1, temp + 2,
-                 temp + 3) != 4) {
-        throw TestException{"Invalid question."};
+      for (size_t i = 0; i < pollfds_.size(); i++) {
+        if (pollfds_[i].revents == 0) {
+          continue;
+        }
+        if (pollfds_[i].revents != POLLIN) {
+          std::stringstream ss;
+          ss << "Error on socket, revents: " << pollfds_[i].revents;
+          throw TestException{ss.str()};
+        }
+        this->receive(i);
       }
-      ip = (temp[0] << 24) | (temp[1] << 16) | (temp[2] << 8) | temp[3];
-      auto fqdn = ip & (((uint64_t)1 << (32 - netmask_)) - 1);
-      if (fqdn < num_offset_) {
-        throw TestException{"Unexpected FQDN in question: too small."};
-      } else if (fqdn >= (num_offset_ + num_req_)) {
-        throw TestException{"Unexpected FQDN in question: too large."};
-      }
-      DnsQuery &query = tests_[fqdn - num_offset_];
-      /* Set the received flag true */
-      query.received_ = true;
-      /* Set the received timestamp */
-      query.time_received_ = time_received;
-      /* Check whether there is an answer */
-      query.answered_ = answer.header_->qr() == 1 &&
-                        answer.header_->rcode() == DNSHeader::RCODE::NoError &&
-                        answer.header_->ancount() > 0;
     } else {
-      /* If the error is not caused by timeout, there is something wrong */
-      if (errno != EWOULDBLOCK) {
-        std::stringstream ss;
-        ss << "Error in recvfrom: " << strerror(errno);
-        throw TestException{ss.str()};
-      }
+      this->receive(0U);
     }
   }
   timer_->stop();

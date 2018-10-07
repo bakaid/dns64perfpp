@@ -34,6 +34,8 @@
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -66,6 +68,7 @@ public:
  * Class to represent one test query
  */
 struct DnsQuery {
+  uint16_t socket_index_; /**< Socket used to send query */
   std::chrono::high_resolution_clock::time_point
       time_sent_; /**< Timestamp of the send time */
   std::chrono::high_resolution_clock::time_point
@@ -74,7 +77,7 @@ struct DnsQuery {
   bool answered_;     /**< Flag to mark whether the answer was valid */
   std::chrono::nanoseconds rtt_; /**< Round-trip time of the query */
 
-  DnsQuery();
+  DnsQuery(uint16_t socket_index);
 };
 
 /**
@@ -95,14 +98,17 @@ private:
   std::chrono::nanoseconds
       burst_delay_; /**< Time between bursts in nanoseconds */
   struct timeval timeout_;
-  Socket sock_; /**< Socket for sending and receiving queries */
   uint8_t query_data_[UDP_MAX_LEN]; /**< Array to store the packet */
   std::unique_ptr<DNSPacket>
       query_; /**< The DNSPacket representation of the query */
-  std::vector<DnsQuery> tests_;  /**< Test queries */
-  uint32_t num_sent_;            /**< Number of sent queries so far */
-  std::mutex m_;                 /**< Mutex for accessing queries */
-  std::unique_ptr<Timer> timer_; /**< Timer for scheduling queries */
+  std::vector<Socket>
+      sockets_; /**< Sockets for sending and receiving queries */
+  std::vector<struct pollfd> pollfds_; /**< Poll structures for sockets*/
+  std::vector<DnsQuery> tests_;        /**< Test queries */
+  uint32_t num_sent_;                  /**< Number of sent queries so far */
+  std::mutex m_;                       /**< Mutex for accessing queries */
+  std::unique_ptr<Timer> timer_;       /**< Timer for scheduling queries */
+  std::vector<uint8_t> answer_data_;
 
   friend class DnsTesterAggregator;
 
@@ -110,6 +116,12 @@ private:
    * Sends a burst
    */
   void test();
+
+  /**
+   * Receives an answer from a socket.
+   * @param socket_index index of the socket
+   */
+  void receive(uint16_t socket_index);
 
 public:
   /**
@@ -123,7 +135,7 @@ public:
    */
   DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
             uint8_t netmask, uint32_t num_req, uint32_t num_burst,
-            uint32_t thread_num, uint32_t thread_id,
+            uint32_t thread_num, uint32_t thread_id, uint16_t num_ports,
             const std::chrono::time_point<std::chrono::high_resolution_clock>
                 &test_start_time,
             std::chrono::nanoseconds burst_delay, struct timeval timeout);

@@ -39,11 +39,13 @@ int main(int argc, char *argv[]) {
   uint32_t ip;
   uint8_t netmask;
   uint32_t num_req, num_burst, num_thread;
+  uint16_t num_port;
   uint64_t burst_delay;
   struct timeval timeout;
-  if (argc < 9) {
+  if (argc < 10) {
     std::cerr << "Usage: dns64perf++ <server> <port> <subnet> <number of "
-                 "requests> <burst size> <number of threads> <delay between "
+                 "requests> <burst size> <number of threads> <number of ports "
+                 "per thread> <delay between "
                  "bursts in ns> <timeout in s>"
               << std::endl;
     return -1;
@@ -102,14 +104,20 @@ int main(int argc, char *argv[]) {
               << std::endl;
     return -1;
   }
+  /* Number of ports per thread */
+  if (sscanf(argv[7], "%hu", &num_port) != 1) {
+    std::cerr << "Bad number of ports per thread, must be between 0 and 2^16."
+              << std::endl;
+    return -1;
+  }
   /* Burst delay */
-  if (sscanf(argv[7], "%lu", &burst_delay) != 1) {
+  if (sscanf(argv[8], "%lu", &burst_delay) != 1) {
     std::cerr << "Bad delay between bursts." << std::endl;
     return -1;
   }
   /* Timeout */
   double timeout_, s, us;
-  if (sscanf(argv[8], "%lf", &timeout_) != 1) {
+  if (sscanf(argv[9], "%lf", &timeout_) != 1) {
     std::cerr << "Bad timeout." << std::endl;
     return -1;
   }
@@ -124,6 +132,7 @@ int main(int argc, char *argv[]) {
   for (uint32_t i = 0; i < num_thread; i++) {
     testers.emplace_back(std::make_unique<DnsTester>(
         server_addr, port, ip, netmask, num_req, num_burst, num_thread, i,
+        num_port,
         reference_time + std::chrono::nanoseconds{burst_delay / num_thread} * i,
         std::chrono::nanoseconds{burst_delay}, timeout));
   }
