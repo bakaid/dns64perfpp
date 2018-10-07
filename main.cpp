@@ -34,7 +34,11 @@
 #include <thread>
 
 int main(int argc, char *argv[]) {
+#ifdef DNS64PERFPP_IPV4
+  struct in_addr server_addr;
+#else
   struct in6_addr server_addr;
+#endif
   uint16_t port;
   uint32_t ip;
   uint8_t netmask;
@@ -50,9 +54,14 @@ int main(int argc, char *argv[]) {
               << std::endl;
     return -1;
   }
-  /* Server address */
+/* Server address */
+#ifdef DNS64PERFPP_IPV4
+  if (inet_pton(AF_INET, argv[1], reinterpret_cast<void *>(&server_addr)) !=
+      1) {
+#else
   if (inet_pton(AF_INET6, argv[1], reinterpret_cast<void *>(&server_addr)) !=
       1) {
+#endif
     std::cerr << "Bad server adddress." << std::endl;
     return -1;
   }

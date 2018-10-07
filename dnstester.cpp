@@ -46,9 +46,14 @@ DnsQuery::DnsQuery(uint16_t socket_index)
       rtt_{std::chrono::nanoseconds{-1}} {}
 
 DnsTester::DnsTester(
-    struct in6_addr server_addr, uint16_t port, uint32_t ip, uint8_t netmask,
-    uint32_t num_req, uint32_t num_burst, uint32_t num_thread,
-    uint32_t thread_id, uint16_t num_ports,
+#ifdef DNS64PERFPP_IPV4
+    struct in_addr server_addr,
+#else
+    struct in6_addr server_addr,
+#endif
+    uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req,
+    uint32_t num_burst, uint32_t num_thread, uint32_t thread_id,
+    uint16_t num_ports,
     const std::chrono::time_point<std::chrono::high_resolution_clock>
         &test_start_time,
     std::chrono::nanoseconds burst_delay, struct timeval timeout)
@@ -64,25 +69,43 @@ DnsTester::DnsTester(
   num_offset_ = thread_id_ * num_req_;
   /* Fill server sockaddr structure */
   memset(&server_, 0x00, sizeof(server_));
+#ifdef DNS64PERFPP_IPV4
+  server_.sin_family = AF_INET;
+  server_.sin_addr = server_addr;
+  server_.sin_port = htons(port);
+#else
   server_.sin6_family = AF_INET6;
   server_.sin6_addr = server_addr;
   server_.sin6_port = htons(port);
+#endif
   /* Bind sockets */
   uint16_t base_port = 10000U;
   while (sockets_.size() < (num_ports == 0U ? 1U : num_ports)) {
     /* Create socket */
     int sockfd;
+#ifdef DNS64PERFPP_IPV4
+    if ((sockfd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+#else
     if ((sockfd = ::socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+#endif
       std::stringstream ss;
       ss << "Cannot create socket: " << strerror(errno);
       throw TestException{ss.str()};
     }
-    /* Bind socket */
+      /* Bind socket */
+#ifdef DNS64PERFPP_IPV4
+    struct sockaddr_in local_addr;
+    memset(&local_addr, 0x00, sizeof(local_addr));
+    local_addr.sin_family = AF_INET;                // IPv4
+    local_addr.sin_addr.s_addr = htonl(INADDR_ANY); // To any valid IP address
+    local_addr.sin_port = htons(base_port++);       // Get a new port
+#else
     struct sockaddr_in6 local_addr;
     memset(&local_addr, 0x00, sizeof(local_addr));
     local_addr.sin6_family = AF_INET6;         // IPv6
     local_addr.sin6_addr = in6addr_any;        // To any valid IP address
     local_addr.sin6_port = htons(base_port++); // Get a new port
+#endif
     if (::bind(sockfd, reinterpret_cast<struct sockaddr *>(&local_addr),
                sizeof(local_addr)) == -1) {
       if (errno == EADDRINUSE) {
@@ -215,7 +238,11 @@ void DnsTester::test() {
 }
 
 inline void DnsTester::receive(uint16_t socket_index) {
+#ifdef DNS64PERFPP_IPV4
+  struct sockaddr_in sender;
+#else
   struct sockaddr_in6 sender;
+#endif
   socklen_t sender_len;
   ssize_t recvlen;
   memset(&sender, 0x00, sizeof(sender));
@@ -226,7 +253,20 @@ inline void DnsTester::receive(uint16_t socket_index) {
     /* Get the time of the receipt */
     std::chrono::high_resolution_clock::time_point time_received =
         std::chrono::high_resolution_clock::now();
-    /* Test whether the answer came from the DUT */
+/* Test whether the answer came from the DUT */
+#ifdef DNS64PERFPP_IPV4
+    if (memcmp(reinterpret_cast<const void *>(&sender.sin_addr),
+               reinterpret_cast<const void *>(&server_.sin_addr),
+               sizeof(struct in_addr)) != 0 ||
+        sender.sin_port != server_.sin_port) {
+      char sender_text[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, reinterpret_cast<const void *>(&sender.sin_addr),
+                sender_text, sizeof(sender_text));
+      std::stringstream ss;
+      ss << "Received packet from other host than the DUT: " << sender_text
+         << ":" << ntohs(sender.sin_port);
+      throw TestException{ss.str()};
+#else
     if (memcmp(reinterpret_cast<const void *>(&sender.sin6_addr),
                reinterpret_cast<const void *>(&server_.sin6_addr),
                sizeof(struct in6_addr)) != 0 ||
@@ -238,6 +278,7 @@ inline void DnsTester::receive(uint16_t socket_index) {
       ss << "Received packet from other host than the DUT: [" << sender_text
          << "]:" << ntohs(sender.sin6_port);
       throw TestException{ss.str()};
+#endif
     }
     /* Parse the answer */
     DNSPacket answer{answer_data_.data(), (size_t)recvlen, answer_data_.size()};
@@ -403,12 +444,19 @@ void DnsTesterAggregator::display() {
 
 void DnsTesterAggregator::write(const char *filename) {
   const auto &first_tester = dns_testers_[0];
+/* Convert server address to string */
+#ifdef DNS64PERFPP_IPV4
+  char server[INET_ADDRSTRLEN];
+  if (inet_ntop(AF_INET,
+                reinterpret_cast<const void *>(&first_tester->server_.sin_addr),
+                server, sizeof(server)) == NULL) {
+#else
   char server[INET6_ADDRSTRLEN];
-  /* Convert server address to string */
   if (inet_ntop(
           AF_INET6,
           reinterpret_cast<const void *>(&first_tester->server_.sin6_addr),
           server, sizeof(server)) == NULL) {
+#endif
     std::stringstream ss;
     ss << "Bad server address: " << strerror(errno);
     throw TestException{ss.str()};
@@ -421,7 +469,11 @@ void DnsTesterAggregator::write(const char *filename) {
   /* Write header */
   fprintf(fp, "%s\n", "dns64perf++ test parameters");
   fprintf(fp, "server: %s\n", server);
+#ifdef DNS64PERFPP_IPV4
+  fprintf(fp, "port: %hu\n", ntohs(first_tester->server_.sin_port));
+#else
   fprintf(fp, "port: %hu\n", ntohs(first_tester->server_.sin6_port));
+#endif
   fprintf(fp, "number of requests: %u\n",
           first_tester->num_req_ * first_tester->num_thread_);
   fprintf(fp, "burst size: %u\n", first_tester->num_burst_);

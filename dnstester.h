@@ -85,13 +85,17 @@ struct DnsQuery {
  */
 class DnsTester {
 private:
+#ifdef DNS64PERFPP_IPV4
+  struct sockaddr_in server_; /**< Address of the server */
+#else
   struct sockaddr_in6 server_; /**< Address of the server */
-  uint32_t ip_;                /**< IP part of the subnet */
-  uint8_t netmask_;            /**< Netmask part of the subnet */
-  uint32_t num_req_;           /**< Number of requests */
-  uint32_t num_burst_;         /**< Burst size */
-  uint32_t num_thread_;        /**< Number of threads */
-  uint32_t thread_id_;         /**< Thread id of this tester */
+#endif
+  uint32_t ip_;         /**< IP part of the subnet */
+  uint8_t netmask_;     /**< Netmask part of the subnet */
+  uint32_t num_req_;    /**< Number of requests */
+  uint32_t num_burst_;  /**< Burst size */
+  uint32_t num_thread_; /**< Number of threads */
+  uint32_t thread_id_;  /**< Thread id of this tester */
   std::chrono::time_point<std::chrono::high_resolution_clock>
       test_start_time_; /**< Time to start the test */
   uint32_t num_offset_; /**< IP offset of this tester */
@@ -133,12 +137,18 @@ public:
    * @param num_burst size of burst
    * @param burst_delay delay between bursts in nanoseconds
    */
-  DnsTester(struct in6_addr server_addr, uint16_t port, uint32_t ip,
-            uint8_t netmask, uint32_t num_req, uint32_t num_burst,
-            uint32_t thread_num, uint32_t thread_id, uint16_t num_ports,
-            const std::chrono::time_point<std::chrono::high_resolution_clock>
-                &test_start_time,
-            std::chrono::nanoseconds burst_delay, struct timeval timeout);
+  DnsTester(
+#ifdef DNS64PERFPP_IPV4
+      struct in_addr server_addr,
+#else
+      struct in6_addr server_addr,
+#endif
+      uint16_t port, uint32_t ip, uint8_t netmask, uint32_t num_req,
+      uint32_t num_burst, uint32_t thread_num, uint32_t thread_id,
+      uint16_t num_ports,
+      const std::chrono::time_point<std::chrono::high_resolution_clock>
+          &test_start_time,
+      std::chrono::nanoseconds burst_delay, struct timeval timeout);
 
   /**
    * Starts the test

@@ -16,24 +16,28 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- 
 
 BINARY = dns64perf++
 OBJECTS = main.o timer.o dns.o dnstester.o raii_socket.o spin_sleep.o
 HEADERS = timer.h dns.h dnstester.h raii_socket.h spin_sleep.hpp
 
 CXX = clang++
-CXXFLAGS = -std=c++14 -O3 -Wall -Wdeprecated -pedantic -g $(DEBUG)
+CXXFLAGS = -std=c++14 -O3 -Wall -Wdeprecated -pedantic -g
 LDFLAGS = -lm -lpthread
 
 PREFIX = /usr
 
+ifeq ($(DEBUG), 1)
+    CXXFLAGS += -DDEBUG
+endif
+
+ifeq ($(IPV4), 1)
+    CXXFLAGS += -DDNS64PERFPP_IPV4
+endif
+
 .PHONY: all clean
 
 all: $(BINARY)
-debug: $(BINARY)
-
-debug: DEBUG=-DDEBUG
 
 install: all
 	install -m 0755 $(BINARY) $(PREFIX)/sbin
