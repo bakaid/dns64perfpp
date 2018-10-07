@@ -60,7 +60,8 @@ void Timer::run() {
     }
 #endif
     --n;
-    sleep_time = interval - function_execution_time;
+    sleep_time = starttime + (n_ - n) * interval_ -
+                 std::chrono::high_resolution_clock::now();
     if (sleep_time.count() > 0) {
 #ifdef DEBUG
       before = std::chrono::high_resolution_clock::now();
