@@ -23,6 +23,7 @@
 
 #include "spin_sleep.hpp"
 #include <iostream>
+#include <stdio.h> /* GL: needed for setting thread affinity */
 
 Timer::Timer(const std::string &threadName, std::function<void(void)> &&prepare,
              std::function<void(void)> &&task,
@@ -95,6 +96,17 @@ Timer::~Timer() {
 void Timer::start() {
   thread_ = std::thread{&Timer::run, this};
   pthread_setname_np(thread_.native_handle(), thread_name_.c_str());
+  // GL: Set the affinity of the thread
+  int thread_id;
+  sscanf(thread_name_.c_str(), "Sender %d", &thread_id);  
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(thread_id, &cpuset);
+  int rc = pthread_setaffinity_np(thread_.native_handle(), sizeof(cpu_set_t), &cpuset);
+  if (rc != 0) 
+    fprintf(stderr, "Error calling pthread_setaffinity_np: %d.\n", rc);
+  else 
+    fprintf(stderr, "Sender thread %d was pinned to CPU core %d.\n", thread_id, thread_id);
 }
 
 void Timer::stop() {

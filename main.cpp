@@ -150,6 +150,15 @@ int main(int argc, char *argv[]) {
       threads.emplace_back([&, i]() { testers[i]->start(); });
       pthread_setname_np(threads.back().native_handle(),
                          ("Receiver " + std::to_string(i)).c_str());
+      // GL: Set the affinity of the thread
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      CPU_SET(num_thread+i, &cpuset);
+      int rc = pthread_setaffinity_np(threads.back().native_handle(), sizeof(cpu_set_t), &cpuset);
+      if (rc != 0)
+        fprintf(stderr, "Error calling pthread_setaffinity_np: %d.\n", rc);
+      else
+        fprintf(stderr, "Receiver thread %d was pinned to CPU core %d.\n", i, num_thread+i);
     }
     for (uint32_t i = 0; i < num_thread; i++) {
       threads[i].join();

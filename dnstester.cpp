@@ -79,7 +79,7 @@ DnsTester::DnsTester(
   server_.sin6_port = htons(port);
 #endif
   /* Bind sockets */
-  uint16_t base_port = 10000U;
+  uint16_t base_port = 1024U; // GL: It was 10000U
   while (sockets_.size() < (num_ports == 0U ? 1U : num_ports)) {
     /* Create socket */
     int sockfd;
